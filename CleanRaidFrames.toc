@@ -1,0 +1,8 @@
+## Interface: 120000
+## Title: Clean Raid Frames
+## Notes: Raid frame restyling with healer highlights, debuff glow, and health bar gradients
+## Author: MIYANKO
+## Version: 1.0.0
+## IconTexture: 133004
+
+RaidFrames.lua
