@@ -1,9 +1,12 @@
 ## Interface: 120005
 ## Title: Clean Raid Frames
 ## Category: UnitFrames
-## Notes: Adds a top-down shadow gradient to raid frame health bars
+## Notes: Health bar gradient and a lower-left indicator when a raid member has a dispellable crowd-control debuff.
 ## Author: MIYANKO
-## Version: 1.0.0
+## Version: 1.1.0
 ## IconTexture: 133004
 
-RaidFrames.lua
+HealerBuffIndicator.lua
+HealthBarTexture.lua
+DispelCCIndicator.lua
+BigDefensiveIndicator.lua
