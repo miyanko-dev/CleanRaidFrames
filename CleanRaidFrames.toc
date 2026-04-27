@@ -1,7 +1,7 @@
-## Interface: 120000
+## Interface: 120005
 ## Title: Clean Raid Frames
 ## Category: UnitFrames
-## Notes: Raid frame restyling with healer highlights, debuff glow, and health bar gradients
+## Notes: Adds a top-down shadow gradient to raid frame health bars
 ## Author: MIYANKO
 ## Version: 1.0.0
 ## IconTexture: 133004
