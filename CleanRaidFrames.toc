@@ -1,7 +1,7 @@
 ## Interface: 120005
 ## Title: Clean Raid Frames
 ## Category: UnitFrames
-## Notes: Health bar gradient and a lower-left indicator when a raid member has a dispellable crowd-control debuff.
+## Notes: Custom indicators on CompactRaid and party frames: healer HoT icon (top-right), dispellable CC icon (bottom-left), defensive cooldown icon (top-left), and health bar gradient.
 ## Author: MIYANKO
 ## Version: 1.1.0
 ## IconTexture: 133004

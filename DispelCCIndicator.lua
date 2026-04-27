@@ -6,6 +6,12 @@ local GLOW_COLOR = {1.0, 0.1, 0.1}
 
 local indicators = {}
 
+-- Restrict attachment to raid and party compact frames via groupType to exclude arena and nameplates
+local function isAllowedFrame(frame)
+    if not frame or not CompactUnitFrame_IsPartyFrame then return false end
+    return CompactUnitFrame_IsPartyFrame(frame)
+end
+
 -- Build proc glow overlay via SpellAlert template to tint icon highlight
 local function buildGlow(frame, anchor)
     local glow = CreateFrame("Frame", nil, frame, "ActionButtonSpellAlertTemplate")
@@ -20,6 +26,7 @@ end
 
 local function ensureIndicator(frame)
     if not frame or frame.cleanCCIndicator then return end
+    if not isAllowedFrame(frame) then return end
     local icon = frame:CreateTexture(nil, "OVERLAY", nil, 7)
     icon:SetTexture(INDICATOR_TEXTURE)
     icon:SetSize(INDICATOR_SIZE, INDICATOR_SIZE)
@@ -30,25 +37,14 @@ local function ensureIndicator(frame)
     indicators[frame] = true
 end
 
+-- Scan harmful auras via combined CROWD_CONTROL and RAID_PLAYER_DISPELLABLE filter to detect dispellable CC
 local function unitHasDispellableCC(unit)
     if not unit or not UnitExists(unit) then return false end
-    local count = C_LossOfControl.GetActiveLossOfControlDataCountByUnit(unit) or 0
-    if count == 0 then return false end
-    local locSpells = {}
-    for i = 1, count do
-        local data = C_LossOfControl.GetActiveLossOfControlDataByUnit(unit, i)
-        if data and data.spellID then locSpells[data.spellID] = true end
-    end
     local found = false
-    AuraUtil.ForEachAura(unit, "HARMFUL", nil, function(aura)
+    AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
         if aura then
-            local ok, match = pcall(function()
-                return aura.spellId and locSpells[aura.spellId] and aura.dispelName and AuraUtil.DispellableDebuffTypes[aura.dispelName]
-            end)
-            if ok and match then
-                found = true
-                return true
-            end
+            found = true
+            return true
         end
     end, true)
     return found
@@ -58,6 +54,12 @@ local function updateFrame(frame)
     local icon = frame.cleanCCIndicator
     if not icon then return end
     local unit = frame.displayedUnit or frame.unit
+    if not unit or not UnitExists(unit) then
+        icon:Hide()
+        local g = frame.cleanCCGlow
+        if g and g:IsShown() then g.ProcLoop:Stop() g:Hide() end
+        return
+    end
     local show = unitHasDispellableCC(unit)
     icon:SetShown(show)
     local glow = frame.cleanCCGlow
@@ -105,8 +107,6 @@ end)
 local f = CreateFrame("Frame")
 f:RegisterEvent("PLAYER_LOGIN")
 f:RegisterEvent("UNIT_AURA")
-f:RegisterEvent("LOSS_OF_CONTROL_ADDED")
-f:RegisterEvent("LOSS_OF_CONTROL_UPDATE")
 f:RegisterEvent("GROUP_ROSTER_UPDATE")
 f:RegisterEvent("PLAYER_ENTERING_WORLD")
 f:SetScript("OnEvent", function(_, event, unit)
@@ -114,7 +114,7 @@ f:SetScript("OnEvent", function(_, event, unit)
         if GetCVar("raidFramesDisplayDebuffs") ~= "0" then
             SetCVar("raidFramesDisplayDebuffs", "0")
         end
-    elseif event == "UNIT_AURA" or event == "LOSS_OF_CONTROL_ADDED" then
+    elseif event == "UNIT_AURA" then
         updateAll(unit)
     else
         updateAll(nil)

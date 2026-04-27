@@ -1,12 +1,12 @@
 # Clean Raid Frames
 
-WoW addon that restyles raid frames with healer-focused highlights, debuff glow, and health bar gradients.
+Adds custom indicators and health bar gradients to CompactRaid and party frames. Works in raids, parties, battlegrounds, and arenas.
 
 ## Features
 
-- **Gradient Healthbars** — Subtle depth gradient overlay on raid healthbars
-- **Healer Buff Glow** — Golden swirl highlight on tracked healer buffs (Atonement, Beacon of Light, Beacon of Faith, Beacon of Salvation, Soothing Mist, Lifebloom, Reversion, Earth Shield, Riptide)
-- **Defensive Buff Glow** — Green swirl highlight on Blizzard's native defensive buff indicator, repositioned to top-left
-- **Debuff Glow** — Blue glow on dispellable role debuffs, red glow on non-dispellable role debuffs
-- **Debuff Limiting** — Shows only one debuff per raid frame, enlarged for role debuffs
-- **Buff Grid** — Repositions buffs in a bottom-right grid to compensate for upscaled icons
+- **Healer HoT Icon** (top-right) — Shows the spell icon of the highest-priority healer buff active on the unit (Atonement, Beacon of Light/Faith/Virtue, Soothing Mist, Lifebloom, Reversion, Earth Shield, Riptide, Rejuvenation, Renew). Golden glow while active.
+- **Dispellable CC Icon** (bottom-left) — Shows when a unit has a dispellable crowd-control debuff. Red glow while active. Works in PvP scenarios.
+- **Defensive Cooldown Icon** (top-left) — Shows when a unit has a defensive cooldown active via Blizzard's built-in BIG_DEFENSIVE filter. Green glow while active. Coverage reflects Blizzard's curated list (PvE-biased).
+- **Gradient Health Bars** — Subtle depth gradient overlay on raid health bars.
+
+Indicators only attach to CompactRaid and party frames. Nameplates and arena enemy frames are excluded.

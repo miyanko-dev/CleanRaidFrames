@@ -21,6 +21,12 @@ local TRACKED_SPELLS = {
 
 local indicators = {}
 
+-- Restrict attachment to raid and party compact frames via groupType to exclude arena and nameplates
+local function isAllowedFrame(frame)
+    if not frame or not CompactUnitFrame_IsPartyFrame then return false end
+    return CompactUnitFrame_IsPartyFrame(frame)
+end
+
 -- Build golden proc glow overlay via SpellAlert template to replicate action button proc highlight
 local function buildGlow(frame, anchor)
     local glow = CreateFrame("Frame", nil, frame, "ActionButtonSpellAlertTemplate")
@@ -33,6 +39,7 @@ end
 
 local function ensureIndicator(frame)
     if not frame or frame.cleanHealerIndicator then return end
+    if not isAllowedFrame(frame) then return end
     local icon = frame:CreateTexture(nil, "OVERLAY", nil, 7)
     icon:SetSize(INDICATOR_SIZE, INDICATOR_SIZE)
     icon:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -INDICATOR_INSET, -INDICATOR_INSET)
@@ -70,6 +77,12 @@ local function updateFrame(frame)
     local icon = frame.cleanHealerIndicator
     if not icon then return end
     local unit = frame.displayedUnit or frame.unit
+    if not unit or not UnitExists(unit) then
+        icon:Hide()
+        local g = frame.cleanHealerGlow
+        if g and g:IsShown() then g.ProcLoop:Stop() g:Hide() end
+        return
+    end
     local spellId = findTrackedBuff(unit)
     local glow = frame.cleanHealerGlow
     if spellId then
