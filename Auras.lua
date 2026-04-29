@@ -1,8 +1,8 @@
 local _, ns = ...
 
 local HIGHLIGHT_SLOTS = 2
-local FRAME_INSET = 1
-local ICON_SPACING = 1
+local FRAME_INSET = 2
+local ICON_SPACING = 4
 local AURA_SCALE = 0.4
 local GLOW_SCALE = 1.5
 local MAX_DEFENSIVE_DURATION = 30
@@ -68,17 +68,18 @@ local function hideGlow(glow)
     end
 end
 
-local function createIcon(parent)
+local function createIcon(parent, useSwipe)
     local button = CreateFrame("Frame", nil, parent)
     button.texture = button:CreateTexture(nil, "OVERLAY", nil, 7)
     button.texture:SetAllPoints(button)
     button.texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     button.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
     button.cooldown:SetAllPoints(button)
-    button.cooldown:SetDrawSwipe(false)
+    button.cooldown:SetDrawSwipe(useSwipe == true)
+    button.cooldown:SetReverse(useSwipe == true)
     button.cooldown:SetDrawBling(false)
     button.cooldown:SetDrawEdge(false)
-    button.cooldown:SetHideCountdownNumbers(false)
+    button.cooldown:SetHideCountdownNumbers(useSwipe == true)
     button:Hide()
     return button
 end
@@ -110,14 +111,14 @@ local function buildIndicators(frame)
 
     local highlightIcons, highlightGlows = {}, {}
     for i = 1, HIGHLIGHT_SLOTS do
-        highlightIcons[i] = createIcon(overlay)
+        highlightIcons[i] = createIcon(overlay, true)
         highlightGlows[i] = createGlow(overlay, highlightIcons[i], nil)
     end
 
-    local ccIcon = createIcon(overlay)
+    local ccIcon = createIcon(overlay, false)
     local ccGlow = createGlow(overlay, ccIcon, DISPEL_COLOR)
 
-    local defensiveIcon = createIcon(overlay)
+    local defensiveIcon = createIcon(overlay, false)
     local defensiveGlow = createGlow(overlay, defensiveIcon, DEFENSIVE_COLOR)
 
     frame.cleanIndicators = {
@@ -179,7 +180,6 @@ local function clearScratch()
     ccInfo.spellId = nil
     ccInfo.duration = nil
     ccInfo.expires = nil
-    ccInfo.dispellable = nil
     defensiveInfo.spellId = nil
     defensiveInfo.duration = nil
     defensiveInfo.expires = nil
@@ -243,7 +243,6 @@ local function collectHighlights(unit)
     return count
 end
 
--- Prefer dispellable CC; among dispellable, pick the first. Fall back to any CC.
 local function collectCC(unit)
     AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
         local spellId = safeSpellId(aura)
@@ -253,20 +252,6 @@ local function collectCC(unit)
         ccInfo.spellId = spellId
         ccInfo.duration = duration
         ccInfo.expires = expires
-        ccInfo.dispellable = true
-        return true
-    end, true)
-    if ccInfo.spellId then return ccInfo.spellId end
-
-    AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL", nil, function(aura)
-        local spellId = safeSpellId(aura)
-        if not spellId then return end
-        local duration, expires = safeTiming(aura)
-        if isNoTimerAura(duration, expires) then return end
-        ccInfo.spellId = spellId
-        ccInfo.duration = duration
-        ccInfo.expires = expires
-        ccInfo.dispellable = false
         return true
     end, true)
     return ccInfo.spellId
@@ -303,9 +288,36 @@ local function hideAllIndicators(indicators)
     hideGlow(indicators.defensiveGlow)
 end
 
+local testMode = false
+local TEST_HIGHLIGHTS = {33763, 194384}  -- Lifebloom, Atonement
+local TEST_CC = 118                       -- Polymorph
+local TEST_DEFENSIVE = 31850              -- Ardent Defender
+
+local function applyTestFrame(indicators)
+    for i = 1, HIGHLIGHT_SLOTS do
+        local icon = indicators.highlightIcons[i]
+        local spellId = TEST_HIGHLIGHTS[i]
+        if spellId then
+            setIconTexture(icon, spellId)
+            setIconCooldown(icon, 15, GetTime() + 10)
+            icon:Show()
+            showGlow(indicators.highlightGlows[i])
+        end
+    end
+    setIconTexture(indicators.ccIcon, TEST_CC)
+    setIconCooldown(indicators.ccIcon, 8, GetTime() + 6)
+    indicators.ccIcon:Show()
+    showGlow(indicators.ccGlow)
+    setIconTexture(indicators.defensiveIcon, TEST_DEFENSIVE)
+    setIconCooldown(indicators.defensiveIcon, 8, GetTime() + 5)
+    indicators.defensiveIcon:Show()
+    showGlow(indicators.defensiveGlow)
+end
+
 local function updateFrame(frame)
     local indicators = frame.cleanIndicators
     if not indicators then return end
+    if testMode then applyTestFrame(indicators); return end
     if not isHealer then hideAllIndicators(indicators); return end
     local unit = frame.displayedUnit or frame.unit
     if not unit or not UnitExists(unit) then hideAllIndicators(indicators); return end
@@ -332,11 +344,7 @@ local function updateFrame(frame)
         setIconTexture(indicators.ccIcon, ccSpell)
         setIconCooldown(indicators.ccIcon, ccInfo.duration, ccInfo.expires)
         indicators.ccIcon:Show()
-        if ccInfo.dispellable then
-            showGlow(indicators.ccGlow)
-        else
-            hideGlow(indicators.ccGlow)
-        end
+        showGlow(indicators.ccGlow)
     else
         hideIcon(indicators.ccIcon)
         hideGlow(indicators.ccGlow)
@@ -395,3 +403,10 @@ eventFrame:SetScript("OnEvent", function(_, event)
     end
     refreshFrames()
 end)
+
+SLASH_HRFTEST1 = "/hrftest"
+SlashCmdList["HRFTEST"] = function()
+    testMode = not testMode
+    print("|cff33ff99HealerRaidFrames|r: test mode " .. (testMode and "ON" or "OFF"))
+    refreshFrames()
+end
