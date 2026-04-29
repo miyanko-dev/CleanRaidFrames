@@ -1,41 +1,50 @@
 local _, ns = ...
 
-local INSET = 2
+local HIGHLIGHT_SLOTS = 2
+local FRAME_INSET = 1
+local ICON_SPACING = 1
+local AURA_SCALE = 0.4
 local GLOW_SCALE = 1.5
-local HEALER_SIZE = 22
-local CC_SIZE = 32
-local DEFENSIVE_SIZE = 22
+local MAX_DEFENSIVE_DURATION = 30
 
-local CC_TEXTURE = 135860
-local DEFENSIVE_TEXTURE = 132341
-local DISPEL_GLOW_COLOR = {1.0, 0.1, 0.1}
-local DEFENSIVE_GLOW_COLOR = {0.1, 1.0, 0.1}
+local DEFENSIVE_COLOR = {0.1, 1.0, 0.1}
+local DISPEL_COLOR = {1.0, 0.1, 0.1}
 
--- Tracked healer buff spellIds; any match is shown in discovery order with a golden glow
-local HEALER_SPELLS = {
-    [364343] = true,  -- Echo (Evoker)
-    [366155] = true,  -- Reversion (Evoker)
-    [33763]  = true,  -- Lifebloom (Druid)
-    [8936]   = true,  -- Regrowth (Druid)
-    [194384] = true,  -- Atonement (Priest)
-    [115175] = true,  -- Soothing Mist (Monk)
-    [124682] = true,  -- Enveloping Mist (Monk)
-    [53563]  = true,  -- Beacon of Light (Paladin)
-    [156910] = true,  -- Beacon of Faith (Paladin)
-    [1244893]= true,  -- Beacon of the Savior (Paladin)
+local HEALER_SPECS = {
+    [256]  = true,  -- Discipline Priest
+    [257]  = true,  -- Holy Priest
+    [264]  = true,  -- Restoration Shaman
+    [65]   = true,  -- Holy Paladin
+    [270]  = true,  -- Mistweaver Monk
+    [105]  = true,  -- Restoration Druid
+    [1468] = true,  -- Preservation Evoker
 }
 
-local frames = {}
-ns.frames = frames
+local HIGHLIGHT_SPELLS = {
+    [156910]  = true, -- Beacon of Faith
+    [1244893] = true, -- Beacon of the Savior
+    [53563]   = true, -- Beacon of Light
+    [974]     = true, -- Earth Shield
+    [383648]  = true, -- Earth Shield (alt)
+    [119611]  = true, -- Renewing Mist
+    [124682]  = true, -- Enveloping Mist
+    [194384]  = true, -- Atonement
+    [33763]   = true, -- Lifebloom
+    [366155]  = true, -- Reversion
+}
 
-local function isAllowedFrame(frame)
+local isHealer = false
+local trackedFrames = {}
+ns.frames = trackedFrames
+
+local function isPartyFrame(frame)
     return frame and CompactUnitFrame_IsPartyFrame and CompactUnitFrame_IsPartyFrame(frame)
 end
 
-local function buildGlow(frame, anchor, size, color)
-    local glow = CreateFrame("Frame", nil, frame, "ActionButtonSpellAlertTemplate")
+local function createGlow(parent, anchor, color)
+    local glow = CreateFrame("Frame", nil, parent, "ActionButtonSpellAlertTemplate")
     glow:SetPoint("CENTER", anchor, "CENTER")
-    glow:SetSize(size * GLOW_SCALE, size * GLOW_SCALE)
+    glow:SetFrameLevel((anchor:GetFrameLevel() or 0) + 10)
     glow.ProcStartFlipbook:Hide()
     if color then
         glow.ProcLoopFlipbook:SetVertexColor(unpack(color))
@@ -48,196 +57,341 @@ end
 local function showGlow(glow)
     if glow and not glow:IsShown() then
         glow:Show()
-        glow.ProcLoop:Play()
+        if glow.ProcLoop then glow.ProcLoop:Play() end
     end
 end
 
 local function hideGlow(glow)
     if glow and glow:IsShown() then
-        glow.ProcLoop:Stop()
+        if glow.ProcLoop then glow.ProcLoop:Stop() end
         glow:Hide()
     end
 end
 
-local HEALER_SLOT_COUNT = 4
+local function createIcon(parent)
+    local button = CreateFrame("Frame", nil, parent)
+    button.texture = button:CreateTexture(nil, "OVERLAY", nil, 7)
+    button.texture:SetAllPoints(button)
+    button.texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    button.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+    button.cooldown:SetAllPoints(button)
+    button.cooldown:SetDrawSwipe(false)
+    button.cooldown:SetDrawBling(false)
+    button.cooldown:SetDrawEdge(false)
+    button.cooldown:SetHideCountdownNumbers(false)
+    button:Hide()
+    return button
+end
 
--- Collect tracked healer buffs in discovery order, capped at HEALER_SLOT_COUNT
-local function collectHealerBuffs(unit, out)
+local function setIconTexture(icon, spellId)
+    local tex = C_Spell.GetSpellTexture(spellId)
+    if tex then icon.texture:SetTexture(tex) end
+end
+
+local function setIconCooldown(icon, duration, expires)
+    local ok = pcall(function()
+        if duration and expires and duration > 0 and expires > 0 then
+            icon.cooldown:SetCooldown(expires - duration, duration)
+        else
+            icon.cooldown:Clear()
+        end
+    end)
+    if not ok then
+        icon.cooldown:Clear()
+    end
+end
+
+local function buildIndicators(frame)
+    if not isPartyFrame(frame) or frame.cleanIndicators then return end
+
+    local overlay = CreateFrame("Frame", nil, frame)
+    overlay:SetAllPoints(frame)
+    overlay:SetFrameLevel((frame:GetFrameLevel() or 0) + 250)
+
+    local highlightIcons, highlightGlows = {}, {}
+    for i = 1, HIGHLIGHT_SLOTS do
+        highlightIcons[i] = createIcon(overlay)
+        highlightGlows[i] = createGlow(overlay, highlightIcons[i], nil)
+    end
+
+    local ccIcon = createIcon(overlay)
+    local ccGlow = createGlow(overlay, ccIcon, DISPEL_COLOR)
+
+    local defensiveIcon = createIcon(overlay)
+    local defensiveGlow = createGlow(overlay, defensiveIcon, DEFENSIVE_COLOR)
+
+    frame.cleanIndicators = {
+        overlay = overlay,
+        highlightIcons = highlightIcons,
+        highlightGlows = highlightGlows,
+        ccIcon = ccIcon,
+        ccGlow = ccGlow,
+        defensiveIcon = defensiveIcon,
+        defensiveGlow = defensiveGlow,
+    }
+    trackedFrames[frame] = true
+end
+
+local function layoutIndicators(frame)
+    local indicators = frame.cleanIndicators
+    if not indicators then return end
+    local frameHeight = frame:GetHeight() or 0
+    if frameHeight <= 0 then return end
+
+    local auraSize = math.max(8, math.floor(frameHeight * AURA_SCALE + 0.5))
+    local glowSize = auraSize * GLOW_SCALE
+
+    for i = 1, HIGHLIGHT_SLOTS do
+        local icon = indicators.highlightIcons[i]
+        icon:SetSize(auraSize, auraSize)
+        icon:ClearAllPoints()
+        if i == 1 then
+            icon:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -FRAME_INSET, -FRAME_INSET)
+        else
+            icon:SetPoint("TOPRIGHT", indicators.highlightIcons[i - 1], "TOPLEFT", -ICON_SPACING, 0)
+        end
+        indicators.highlightGlows[i]:SetSize(glowSize, glowSize)
+    end
+
+    indicators.ccIcon:SetSize(auraSize, auraSize)
+    indicators.ccIcon:ClearAllPoints()
+    indicators.ccIcon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", FRAME_INSET, FRAME_INSET)
+    indicators.ccGlow:SetSize(glowSize, glowSize)
+
+    indicators.defensiveIcon:SetSize(auraSize, auraSize)
+    indicators.defensiveIcon:ClearAllPoints()
+    indicators.defensiveIcon:SetPoint("TOPLEFT", frame, "TOPLEFT", FRAME_INSET, -FRAME_INSET)
+    indicators.defensiveGlow:SetSize(glowSize, glowSize)
+end
+
+local highlightIds = {}
+local highlightDurations = {}
+local highlightExpires = {}
+local ccInfo = {}
+local defensiveInfo = {}
+
+local function clearScratch()
+    for i = #highlightIds, 1, -1 do
+        highlightIds[i] = nil
+        highlightDurations[i] = nil
+        highlightExpires[i] = nil
+    end
+    ccInfo.spellId = nil
+    ccInfo.duration = nil
+    ccInfo.expires = nil
+    ccInfo.dispellable = nil
+    defensiveInfo.spellId = nil
+    defensiveInfo.duration = nil
+    defensiveInfo.expires = nil
+end
+
+local function safeLookup(tbl, key)
+    local ok, value = pcall(function() return tbl[key] end)
+    if ok then return value end
+    return nil
+end
+
+local function safeSpellId(aura)
+    if not aura then return nil end
+    local ok, value = pcall(function() return aura.spellId end)
+    if ok and type(value) == "number" then return value end
+    return nil
+end
+
+local function safeBoolField(aura, field)
+    local ok, value = pcall(function() return aura[field] end)
+    if ok and value == true then return true end
+    return false
+end
+
+local function safeTiming(aura)
+    local ok, duration, expires = pcall(function() return aura.duration, aura.expirationTime end)
+    if not ok then return nil, nil end
+    if type(duration) ~= "number" then duration = nil end
+    if type(expires) ~= "number" then expires = nil end
+    return duration, expires
+end
+
+-- Reject only when we can prove no active timer. Missing/unreadable timing passes through.
+local function isNoTimerAura(duration, expires)
+    if duration == nil or expires == nil then return false end
+    local ok, zero = pcall(function() return duration == 0 and expires == 0 end)
+    return ok and zero == true
+end
+
+-- Reject only when we can prove the aura is long-lived. Missing/unreadable timing passes through.
+local function exceedsDefensiveDuration(duration)
+    if duration == nil then return false end
+    local ok, over = pcall(function() return duration > MAX_DEFENSIVE_DURATION end)
+    return ok and over == true
+end
+
+local function collectHighlights(unit)
     local count = 0
     AuraUtil.ForEachAura(unit, "HELPFUL|PLAYER", nil, function(aura)
-        if aura then
-            local ok, match = pcall(function() return HEALER_SPELLS[aura.spellId] end)
-            if ok and match then
-                count = count + 1
-                out[count] = aura.spellId
-                if count >= HEALER_SLOT_COUNT then return true end
-            end
+        if not safeBoolField(aura, "isFromPlayerOrPlayerPet") then return end
+        local spellId = safeSpellId(aura)
+        if spellId and safeLookup(HIGHLIGHT_SPELLS, spellId) then
+            local duration, expires = safeTiming(aura)
+            count = count + 1
+            highlightIds[count] = spellId
+            highlightDurations[count] = duration
+            highlightExpires[count] = expires
+            if count >= HIGHLIGHT_SLOTS then return true end
         end
     end, true)
     return count
 end
 
--- Detect CC in one pass: any CROWD_CONTROL aura sets hasCC; an entry that is also RAID_PLAYER_DISPELLABLE sets dispellable
-local function scanCC(unit)
-    local hasCC, dispellable = false, false
-    AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL", nil, function()
-        hasCC = true
+-- Prefer dispellable CC; among dispellable, pick the first. Fall back to any CC.
+local function collectCC(unit)
+    AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
+        local spellId = safeSpellId(aura)
+        if not spellId then return end
+        local duration, expires = safeTiming(aura)
+        if isNoTimerAura(duration, expires) then return end
+        ccInfo.spellId = spellId
+        ccInfo.duration = duration
+        ccInfo.expires = expires
+        ccInfo.dispellable = true
         return true
     end, true)
-    if hasCC then
-        AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL|RAID_PLAYER_DISPELLABLE", nil, function()
-            dispellable = true
-            return true
-        end, true)
-    end
-    return hasCC, dispellable
+    if ccInfo.spellId then return ccInfo.spellId end
+
+    AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL", nil, function(aura)
+        local spellId = safeSpellId(aura)
+        if not spellId then return end
+        local duration, expires = safeTiming(aura)
+        if isNoTimerAura(duration, expires) then return end
+        ccInfo.spellId = spellId
+        ccInfo.duration = duration
+        ccInfo.expires = expires
+        ccInfo.dispellable = false
+        return true
+    end, true)
+    return ccInfo.spellId
 end
 
-local function hasBigDefensive(unit)
-    local found = false
-    local mark = function(a)
-        local ok, exp = pcall(function() return a and a.expirationTime end)
-        if ok and exp and exp > 0 then
-            found = true
-            return true
-        end
-    end
-    AuraUtil.ForEachAura(unit, "HELPFUL|BIG_DEFENSIVE", nil, mark, true)
-    return found
+local function findDefensive(unit)
+    AuraUtil.ForEachAura(unit, "HELPFUL|BIG_DEFENSIVE", nil, function(aura)
+        local spellId = safeSpellId(aura)
+        if not spellId then return end
+        local duration, expires = safeTiming(aura)
+        if isNoTimerAura(duration, expires) then return end
+        if exceedsDefensiveDuration(duration) then return end
+        defensiveInfo.spellId = spellId
+        defensiveInfo.duration = duration
+        defensiveInfo.expires = expires
+        return true
+    end, true)
+    return defensiveInfo.spellId
 end
 
-local function ensureIndicators(frame)
-    if not isAllowedFrame(frame) or frame.cleanIndicators then return end
-
-    local healerIcons = {}
-    local healerGlows = {}
-    for i = 1, HEALER_SLOT_COUNT do
-        local icon = frame:CreateTexture(nil, "OVERLAY", nil, 7)
-        icon:SetSize(HEALER_SIZE, HEALER_SIZE)
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        if i == 1 then
-            icon:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -INSET, -INSET)
-        else
-            icon:SetPoint("TOPRIGHT", healerIcons[i - 1], "TOPLEFT", -INSET, 0)
-        end
-        icon:Hide()
-        healerIcons[i] = icon
-        healerGlows[i] = buildGlow(frame, icon, HEALER_SIZE, nil)
-    end
-
-    local cc = frame:CreateTexture(nil, "OVERLAY", nil, 7)
-    cc:SetTexture(CC_TEXTURE)
-    cc:SetSize(CC_SIZE, CC_SIZE)
-    cc:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", INSET, INSET)
-    cc:Hide()
-
-    local defensive = frame:CreateTexture(nil, "OVERLAY", nil, 7)
-    defensive:SetTexture(DEFENSIVE_TEXTURE)
-    defensive:SetSize(DEFENSIVE_SIZE, DEFENSIVE_SIZE)
-    defensive:SetPoint("TOPLEFT", frame, "TOPLEFT", INSET, -INSET)
-    defensive:Hide()
-
-    frame.cleanIndicators = {
-        healerIcons = healerIcons,
-        healerGlows = healerGlows,
-        cc = cc,
-        defensive = defensive,
-        ccGlow = buildGlow(frame, cc, CC_SIZE, DISPEL_GLOW_COLOR),
-        defensiveGlow = buildGlow(frame, defensive, DEFENSIVE_SIZE, DEFENSIVE_GLOW_COLOR),
-    }
-    frames[frame] = true
+local function hideIcon(icon)
+    icon:Hide()
+    icon.cooldown:Clear()
 end
 
-local healerScratch = {}
+local function hideAllIndicators(indicators)
+    for i = 1, HIGHLIGHT_SLOTS do
+        hideIcon(indicators.highlightIcons[i])
+        hideGlow(indicators.highlightGlows[i])
+    end
+    hideIcon(indicators.ccIcon)
+    hideGlow(indicators.ccGlow)
+    hideIcon(indicators.defensiveIcon)
+    hideGlow(indicators.defensiveGlow)
+end
 
 local function updateFrame(frame)
-    local ind = frame.cleanIndicators
-    if not ind then return end
+    local indicators = frame.cleanIndicators
+    if not indicators then return end
+    if not isHealer then hideAllIndicators(indicators); return end
     local unit = frame.displayedUnit or frame.unit
-    if not unit or not UnitExists(unit) then
-        for i = 1, HEALER_SLOT_COUNT do
-            ind.healerIcons[i]:Hide()
-            hideGlow(ind.healerGlows[i])
-        end
-        ind.cc:Hide()
-        ind.defensive:Hide()
-        hideGlow(ind.ccGlow)
-        hideGlow(ind.defensiveGlow)
-        return
-    end
+    if not unit or not UnitExists(unit) then hideAllIndicators(indicators); return end
 
-    for i = #healerScratch, 1, -1 do healerScratch[i] = nil end
-    local healerCount = collectHealerBuffs(unit, healerScratch)
-    for i = 1, HEALER_SLOT_COUNT do
-        local spellId = healerScratch[i]
-        if spellId and i <= healerCount then
-            local tex = C_Spell.GetSpellTexture(spellId)
-            if tex then ind.healerIcons[i]:SetTexture(tex) end
-            ind.healerIcons[i]:Show()
-            showGlow(ind.healerGlows[i])
+    clearScratch()
+    local highlightCount = collectHighlights(unit)
+    local ccSpell = collectCC(unit)
+    local defensiveSpell = findDefensive(unit)
+
+    for i = 1, HIGHLIGHT_SLOTS do
+        local icon = indicators.highlightIcons[i]
+        if i <= highlightCount then
+            setIconTexture(icon, highlightIds[i])
+            setIconCooldown(icon, highlightDurations[i], highlightExpires[i])
+            icon:Show()
+            showGlow(indicators.highlightGlows[i])
         else
-            ind.healerIcons[i]:Hide()
-            hideGlow(ind.healerGlows[i])
+            hideIcon(icon)
+            hideGlow(indicators.highlightGlows[i])
         end
     end
 
-    local hasCC, dispellable = scanCC(unit)
-    if hasCC then
-        ind.cc:Show()
-        if dispellable then
-            showGlow(ind.ccGlow)
+    if ccSpell then
+        setIconTexture(indicators.ccIcon, ccSpell)
+        setIconCooldown(indicators.ccIcon, ccInfo.duration, ccInfo.expires)
+        indicators.ccIcon:Show()
+        if ccInfo.dispellable then
+            showGlow(indicators.ccGlow)
         else
-            hideGlow(ind.ccGlow)
+            hideGlow(indicators.ccGlow)
         end
     else
-        ind.cc:Hide()
-        hideGlow(ind.ccGlow)
+        hideIcon(indicators.ccIcon)
+        hideGlow(indicators.ccGlow)
     end
 
-    if hasBigDefensive(unit) then
-        ind.defensive:Show()
-        showGlow(ind.defensiveGlow)
+    if defensiveSpell then
+        setIconTexture(indicators.defensiveIcon, defensiveSpell)
+        setIconCooldown(indicators.defensiveIcon, defensiveInfo.duration, defensiveInfo.expires)
+        indicators.defensiveIcon:Show()
+        showGlow(indicators.defensiveGlow)
     else
-        ind.defensive:Hide()
-        hideGlow(ind.defensiveGlow)
+        hideIcon(indicators.defensiveIcon)
+        hideGlow(indicators.defensiveGlow)
     end
 end
 
--- Refresh every tracked frame; avoids UnitIsUnit cross-token match which throws under tainted execution
-local function dispatch()
-    for frame in pairs(frames) do
+local function refreshFrames()
+    for frame in pairs(trackedFrames) do
         if not frame:IsForbidden() then
             updateFrame(frame)
         end
     end
 end
 
+local function refreshSpec()
+    local idx = GetSpecialization and GetSpecialization()
+    local id = idx and GetSpecializationInfo and GetSpecializationInfo(idx)
+    isHealer = id and HEALER_SPECS[id] or false
+end
+
 hooksecurefunc("DefaultCompactUnitFrameSetup", function(frame)
-    ensureIndicators(frame)
+    buildIndicators(frame)
+    layoutIndicators(frame)
     updateFrame(frame)
 end)
 hooksecurefunc("DefaultCompactMiniFrameSetup", function(frame)
-    ensureIndicators(frame)
+    buildIndicators(frame)
+    layoutIndicators(frame)
     updateFrame(frame)
 end)
 hooksecurefunc("CompactUnitFrame_UpdateAll", function(frame)
-    ensureIndicators(frame)
+    buildIndicators(frame)
+    layoutIndicators(frame)
     updateFrame(frame)
 end)
 
-local events = CreateFrame("Frame")
-events:RegisterEvent("PLAYER_LOGIN")
-events:RegisterEvent("UNIT_AURA")
-events:RegisterEvent("GROUP_ROSTER_UPDATE")
-events:RegisterEvent("PLAYER_ENTERING_WORLD")
-events:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_LOGIN" then
-        if GetCVar("raidFramesDisplayDebuffs") ~= "0" then
-            SetCVar("raidFramesDisplayDebuffs", "0")
-        end
-        if GetCVar("raidFramesCenterBigDefensive") ~= "0" then
-            SetCVar("raidFramesCenterBigDefensive", "0")
-        end
+local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+eventFrame:RegisterEvent("UNIT_AURA")
+eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+eventFrame:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_LOGIN" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
+        refreshSpec()
     end
-    dispatch()
+    refreshFrames()
 end)
