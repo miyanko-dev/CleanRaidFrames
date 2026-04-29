@@ -95,10 +95,14 @@ end
 
 local function hasBigDefensive(unit)
     local found = false
-    local mark = function() found = true return true end
+    local mark = function(a)
+        local ok, exp = pcall(function() return a and a.expirationTime end)
+        if ok and exp and exp > 0 then
+            found = true
+            return true
+        end
+    end
     AuraUtil.ForEachAura(unit, "HELPFUL|BIG_DEFENSIVE", nil, mark, true)
-    if found then return true end
-    AuraUtil.ForEachAura(unit, "HELPFUL|EXTERNAL_DEFENSIVE", nil, mark, true)
     return found
 end
 
