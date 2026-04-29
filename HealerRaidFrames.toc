@@ -1,7 +1,7 @@
 ## Interface: 120005
 ## Title: Healer Raid Frames
 ## Category: UnitFrames
-## Notes: Healer-focused raid frame indicators: player-cast HoT/shield icons (top-right), single CC icon with dispellable glow (bottom-left), major defensive icon (top-left), and health bar gradient.
+## Notes: Healer buffs (top-right, golden), defensive cooldowns (top-left, green), dispellable CC (bottom-left, red).
 ## Author: MIYANKO
 ## Version: 2.0.0
 ## IconTexture: 133004
