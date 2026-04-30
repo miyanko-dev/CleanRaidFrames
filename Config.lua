@@ -1,4 +1,3 @@
-local ADDON_NAME = ...
 HealerRaidFrames = HealerRaidFrames or {}
 local HRF = HealerRaidFrames
 
@@ -71,8 +70,6 @@ local DEFAULTS = {
     },
 }
 
-HRF.DEFAULTS = DEFAULTS
-
 local DEFAULT_SCALE = 0.4 -- 40% of raid frame height
 local MIN_SCALE, MAX_SCALE = 0.05, 1.0
 
@@ -89,9 +86,6 @@ local GLOBAL_DEFAULTS = {
 
 HRF.SCALE_MIN = MIN_SCALE
 HRF.SCALE_MAX = MAX_SCALE
-HRF.SCALE_DEFAULT = DEFAULT_SCALE
-
-HRF.GLOBAL_DEFAULTS = GLOBAL_DEFAULTS
 
 local listeners = {}
 
@@ -347,30 +341,6 @@ function HRF.SetSectionColor(key, r, g, b)
     notify()
 end
 
--- Returns the 1-based position of spellId in the visible (show=true) order list, or nil.
-function HRF.GetVisibleOrder(specId, spellId)
-    local spec = getSpecDB(specId)
-    if not spec then return nil end
-    local pos = 0
-    for _, id in ipairs(spec.order) do
-        if spec.show[id] then
-            pos = pos + 1
-            if id == spellId then return pos end
-        end
-    end
-    return nil
-end
-
-function HRF.ShouldShow(specId, spellId)
-    local spec = getSpecDB(specId)
-    return spec ~= nil and spec.show[spellId] == true
-end
-
-function HRF.ShouldGlow(specId, spellId)
-    local spec = getSpecDB(specId)
-    return spec ~= nil and spec.glow[spellId] == true
-end
-
 function HRF.SetShow(specId, spellId, value)
     local spec = getSpecDB(specId)
     if not spec then return end
@@ -385,40 +355,18 @@ function HRF.SetGlow(specId, spellId, value)
     notify()
 end
 
-local function indexOf(list, value)
-    for i, v in ipairs(list) do
-        if v == value then return i end
-    end
-    return nil
-end
-
-function HRF.MoveUp(specId, spellId)
-    local spec = getSpecDB(specId)
-    if not spec then return end
-    local i = indexOf(spec.order, spellId)
-    if not i or i == 1 then return end
-    spec.order[i], spec.order[i - 1] = spec.order[i - 1], spec.order[i]
-    notify()
-end
-
-function HRF.MoveDown(specId, spellId)
-    local spec = getSpecDB(specId)
-    if not spec then return end
-    local i = indexOf(spec.order, spellId)
-    if not i or i == #spec.order then return end
-    spec.order[i], spec.order[i + 1] = spec.order[i + 1], spec.order[i]
-    notify()
-end
-
 function HRF.MoveTo(specId, spellId, finalPos)
     local spec = getSpecDB(specId)
     if not spec then return end
-    local i = indexOf(spec.order, spellId)
-    if not i then return end
+    local from
+    for i, v in ipairs(spec.order) do
+        if v == spellId then from = i; break end
+    end
+    if not from then return end
     local n = #spec.order
     finalPos = math.max(1, math.min(n, finalPos))
-    if i == finalPos then return end
-    table.remove(spec.order, i)
+    if from == finalPos then return end
+    table.remove(spec.order, from)
     table.insert(spec.order, finalPos, spellId)
     notify()
 end

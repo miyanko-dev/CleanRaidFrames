@@ -4,12 +4,15 @@ local HIGHLIGHT_SLOTS = HRF.MAX_HIGHLIGHT_SLOTS or 4
 local FRAME_INSET = 2
 local ICON_SPACING = 2
 local GLOW_SCALE = 1.5
-local MAX_DEFENSIVE_DURATION = 30
 
-local activeSpec = nil
+local activeSpecConfig = nil
 local isHealer = false
 local testMode = false
 local trackedFrames = {}
+-- Map unit-token → frame. The self-frame is registered under both its raid/party
+-- token (e.g. "raid5") AND "player" so UNIT_AURA arg1="player" routes correctly
+-- for self-cast defensives.
+local framesByUnit = {}
 
 local function isPartyFrame(frame)
     return frame and CompactUnitFrame_IsPartyFrame and CompactUnitFrame_IsPartyFrame(frame)
@@ -55,74 +58,18 @@ local function hideGlow(glow)
     end
 end
 
-local function formatCountdown(remaining)
-    if remaining >= 60 then
-        return string.format("%dm", math.floor(remaining / 60 + 0.5))
-    end
-    return string.format("%d", math.floor(remaining + 0.5))
-end
-
-local function updateCountdown(icon)
-    local expires = icon.expires
-    if not expires then
-        icon.countdown:SetText("")
-        return
-    end
-    local remaining = expires - GetTime()
-    if remaining <= 0 then
-        icon.countdown:SetText("")
-        return
-    end
-    icon.countdown:SetText(formatCountdown(remaining))
-end
-
-local function createIcon(parent, useSwipe)
+local function createIcon(parent)
     local icon = CreateFrame("Frame", nil, parent)
     icon.texture = icon:CreateTexture(nil, "OVERLAY", nil, 7)
     icon.texture:SetAllPoints(icon)
     icon.texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    icon.cooldown = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
-    icon.cooldown:SetAllPoints(icon)
-    icon.cooldown:SetDrawSwipe(useSwipe)
-    icon.cooldown:SetReverse(useSwipe)
-    icon.cooldown:SetHideCountdownNumbers(true)
-    icon.cooldown:SetDrawBling(false)
-    icon.cooldown:SetDrawEdge(false)
-    icon.countdown = icon:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
-    icon.countdown:SetPoint("CENTER", icon, "CENTER", 0, 0)
-    icon.countdown:SetTextColor(1, 1, 1, 1)
-    icon.countdown:SetDrawLayer("OVERLAY", 7)
-    icon:SetScript("OnUpdate", function(self, elapsed)
-        self.countdownElapsed = (self.countdownElapsed or 0) + elapsed
-        if self.countdownElapsed < 0.1 then return end
-        self.countdownElapsed = 0
-        updateCountdown(self)
-    end)
     icon:Hide()
     return icon
 end
 
-local function setCooldown(icon, duration, expires)
-    local ok = pcall(function()
-        if duration and expires and duration > 0 and expires > 0 then
-            icon.cooldown:SetCooldown(expires - duration, duration)
-            icon.expires = expires
-        else
-            icon.cooldown:Clear()
-            icon.expires = nil
-        end
-    end)
-    if not ok then
-        icon.cooldown:Clear()
-        icon.expires = nil
-    end
-    updateCountdown(icon)
-end
-
-local function showSlot(icon, glow, spellId, duration, expires, useGlow)
+local function showSlot(icon, glow, spellId, useGlow)
     local tex = C_Spell.GetSpellTexture(spellId)
     if tex then icon.texture:SetTexture(tex) end
-    setCooldown(icon, duration, expires)
     icon:Show()
     if useGlow == false then
         hideGlow(glow)
@@ -133,9 +80,6 @@ end
 
 local function hideSlot(icon, glow)
     icon:Hide()
-    icon.cooldown:Clear()
-    icon.expires = nil
-    icon.countdown:SetText("")
     hideGlow(glow)
 end
 
@@ -148,14 +92,14 @@ local function buildIndicators(frame)
 
     local highlights = {}
     for i = 1, HIGHLIGHT_SLOTS do
-        local icon = createIcon(overlay, false)
+        local icon = createIcon(overlay)
         highlights[i] = { icon = icon, glow = createGlow(overlay, icon) }
     end
 
-    local ccIcon = createIcon(overlay, false)
-    local pureCCIcon = createIcon(overlay, false)
-    local dispelIcon = createIcon(overlay, false)
-    local defensiveIcon = createIcon(overlay, false)
+    local ccIcon = createIcon(overlay)
+    local pureCCIcon = createIcon(overlay)
+    local dispelIcon = createIcon(overlay)
+    local defensiveIcon = createIcon(overlay)
 
     frame.cleanIndicators = {
         highlights = highlights,
@@ -171,33 +115,30 @@ local function buildIndicators(frame)
     trackedFrames[frame] = true
 end
 
+local SINGLE_GLOW_SECTIONS = { "defensive", "cc", "pureCC", "dispel" }
+
 local function applyColors(ind)
     local hCustom = HRF.GetSectionGlowCustom("highlight")
     local hr, hg, hb = HRF.GetSectionColor("highlight")
     for _, slot in ipairs(ind.highlights) do applyGlowColor(slot.glow, hr, hg, hb, hCustom) end
-    local dCustom = HRF.GetSectionGlowCustom("defensive")
-    local dr, dg, db = HRF.GetSectionColor("defensive")
-    applyGlowColor(ind.defensiveGlow, dr, dg, db, dCustom)
-    local cCustom = HRF.GetSectionGlowCustom("cc")
-    local cr, cg, cb = HRF.GetSectionColor("cc")
-    applyGlowColor(ind.ccGlow, cr, cg, cb, cCustom)
-    local pcCustom = HRF.GetSectionGlowCustom("pureCC")
-    local pcr, pcg, pcb = HRF.GetSectionColor("pureCC")
-    applyGlowColor(ind.pureCCGlow, pcr, pcg, pcb, pcCustom)
-    local pCustom = HRF.GetSectionGlowCustom("dispel")
-    local pr, pg, pb = HRF.GetSectionColor("dispel")
-    applyGlowColor(ind.dispelGlow, pr, pg, pb, pCustom)
+    for _, key in ipairs(SINGLE_GLOW_SECTIONS) do
+        local custom = HRF.GetSectionGlowCustom(key)
+        local r, g, b = HRF.GetSectionColor(key)
+        applyGlowColor(ind[key .. "Glow"], r, g, b, custom)
+    end
+end
+
+local function applyColorsAllFrames()
+    for frame in pairs(trackedFrames) do
+        if not frame:IsForbidden() and frame.cleanIndicators then
+            applyColors(frame.cleanIndicators)
+        end
+    end
 end
 
 local function sizeFor(frameHeight, key)
     local scale = HRF.GetSectionScale and HRF.GetSectionScale(key) or 0.4
     return math.max(8, math.floor(frameHeight * scale + 0.5))
-end
-
-local function styleCountdown(fs, size)
-    local fontSize = math.max(8, math.floor(size * 0.6 + 0.5))
-    local font = fs:GetFont()
-    if font then fs:SetFont(font, fontSize, "OUTLINE") end
 end
 
 local function layoutIndicators(frame)
@@ -216,30 +157,33 @@ local function layoutIndicators(frame)
             slot.icon:SetPoint("TOPRIGHT", ind.highlights[i - 1].icon, "TOPLEFT", -ICON_SPACING, 0)
         end
         slot.glow:SetSize(highlightSize * GLOW_SCALE, highlightSize * GLOW_SCALE)
-        styleCountdown(slot.icon.countdown, highlightSize)
     end
 
     local ccSize = sizeFor(frameHeight, "cc")
     ind.ccIcon:SetSize(ccSize, ccSize)
     ind.ccGlow:SetSize(ccSize * GLOW_SCALE, ccSize * GLOW_SCALE)
-    styleCountdown(ind.ccIcon.countdown, ccSize)
 
     local pureCCSize = sizeFor(frameHeight, "pureCC")
     ind.pureCCIcon:SetSize(pureCCSize, pureCCSize)
     ind.pureCCGlow:SetSize(pureCCSize * GLOW_SCALE, pureCCSize * GLOW_SCALE)
-    styleCountdown(ind.pureCCIcon.countdown, pureCCSize)
 
     local dispelSize = sizeFor(frameHeight, "dispel")
     ind.dispelIcon:SetSize(dispelSize, dispelSize)
     ind.dispelGlow:SetSize(dispelSize * GLOW_SCALE, dispelSize * GLOW_SCALE)
-    styleCountdown(ind.dispelIcon.countdown, dispelSize)
 
     local defSize = sizeFor(frameHeight, "defensive")
     ind.defensiveIcon:SetSize(defSize, defSize)
     ind.defensiveIcon:ClearAllPoints()
     ind.defensiveIcon:SetPoint("TOPLEFT", frame, "TOPLEFT", FRAME_INSET, -FRAME_INSET)
     ind.defensiveGlow:SetSize(defSize * GLOW_SCALE, defSize * GLOW_SCALE)
-    styleCountdown(ind.defensiveIcon.countdown, defSize)
+end
+
+local function layoutAllFrames()
+    for frame in pairs(trackedFrames) do
+        if not frame:IsForbidden() then
+            layoutIndicators(frame)
+        end
+    end
 end
 
 -- Arranges the bottom-left debuff slots left→right in fixed priority order:
@@ -292,33 +236,6 @@ local function safeAuraInstanceID(aura)
     return ok and value or nil
 end
 
-local function safeBool(aura, field)
-    local ok, value = pcall(function() return aura[field] end)
-    return ok and value == true
-end
-
-local function safeTiming(aura)
-    local ok, duration, expires = pcall(function() return aura.duration, aura.expirationTime end)
-    if not ok then return nil, nil end
-    if type(duration) ~= "number" then duration = nil end
-    if type(expires) ~= "number" then expires = nil end
-    return duration, expires
-end
-
--- Returns true only when we can prove the aura has no active timer.
-local function hasNoTimer(duration, expires)
-    if duration == nil or expires == nil then return false end
-    local ok, zero = pcall(function() return duration == 0 and expires == 0 end)
-    return ok and zero == true
-end
-
--- Returns true only when duration is readable and exceeds the cap.
-local function exceedsCap(duration, cap)
-    if duration == nil then return false end
-    local ok, over = pcall(function() return duration > cap end)
-    return ok and over == true
-end
-
 local highlights = {}
 local cc = {}
 local pureCC = {}
@@ -331,28 +248,44 @@ local function collectHighlights(unit)
     for i = #highlights, 1, -1 do highlights[i] = nil end
     for k in pairs(auraByID) do auraByID[k] = nil end
 
-    local spec = HRF.GetSpecConfig and HRF.GetSpecConfig(activeSpec)
+    local spec = activeSpecConfig
     if not spec then return end
 
+    -- Count every spell the user has enabled for this spec. The aura walk
+    -- can stop once we've found all of them -- at that point every additional
+    -- aura is irrelevant to us, so further iteration cannot change the result.
+    -- Iterating spec.order (not spec.show) avoids counting stale keys that
+    -- may have been left behind by removed/renamed spells in old saved profiles.
+    local trackedCount = 0
+    for _, spellId in ipairs(spec.order) do
+        if spec.show[spellId] then trackedCount = trackedCount + 1 end
+    end
+    if trackedCount == 0 then return end
+
+    -- HELPFUL|PLAYER is Blizzard's authoritative "buffs cast by the player" filter,
+    -- evaluated on the C side. We intentionally do NOT add a Lua-side
+    -- isFromPlayerOrPlayerPet guard: some auras (certain Atonement procs, Preservation
+    -- Evoker Echo chains, pet-mediated applications) are approved by the filter but
+    -- have the field set to nil, which would cause the icon to vanish intermittently.
+    local found = 0
     AuraUtil.ForEachAura(unit, "HELPFUL|PLAYER", nil, function(aura)
+        local stop = false
         pcall(function()
             if isRestrictedAura(aura) then return end
-            if not safeBool(aura, "isFromPlayerOrPlayerPet") then return end
             local spellId = safeSpellId(aura)
             if spellId and spec.show[spellId] and not auraByID[spellId] then
-                local duration, expires = safeTiming(aura)
-                auraByID[spellId] = { duration = duration, expires = expires }
+                auraByID[spellId] = true
+                found = found + 1
+                if found >= trackedCount then stop = true end
             end
         end)
+        if stop then return true end
     end, true)
 
     for _, spellId in ipairs(spec.order) do
         if spec.show[spellId] and auraByID[spellId] then
-            local a = auraByID[spellId]
             highlights[#highlights + 1] = {
                 spellId = spellId,
-                duration = a.duration,
-                expires = a.expires,
                 useGlow = spec.glow[spellId] == true,
             }
             if #highlights >= HIGHLIGHT_SLOTS then break end
@@ -364,19 +297,17 @@ end
 -- in dispellableCCInstances so the other passes can skip them (an aura can match
 -- multiple filters, e.g. a dispellable CC also passes HARMFUL|CROWD_CONTROL alone).
 local function collectCC(unit)
-    cc.spellId, cc.duration, cc.expires = nil, nil, nil
+    cc.spellId = nil
     for k in pairs(dispellableCCInstances) do dispellableCCInstances[k] = nil end
     AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
         pcall(function()
             if isRestrictedAura(aura) then return end
             local spellId = safeSpellId(aura)
             if not spellId then return end
-            local duration, expires = safeTiming(aura)
-            if hasNoTimer(duration, expires) then return end
             local instanceId = safeAuraInstanceID(aura)
             if instanceId then dispellableCCInstances[instanceId] = true end
             if not cc.spellId then
-                cc.spellId, cc.duration, cc.expires = spellId, duration, expires
+                cc.spellId = spellId
             end
         end)
     end, true)
@@ -385,7 +316,7 @@ end
 -- Pure CC = crowd-control that is NOT dispellable. Skips anything already captured
 -- as dispellable CC so we never show the same icon in two adjacent slots.
 local function collectPureCC(unit)
-    pureCC.spellId, pureCC.duration, pureCC.expires = nil, nil, nil
+    pureCC.spellId = nil
     AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL", nil, function(aura)
         local stop = false
         pcall(function()
@@ -394,9 +325,7 @@ local function collectPureCC(unit)
             if instanceId and dispellableCCInstances[instanceId] then return end
             local spellId = safeSpellId(aura)
             if not spellId then return end
-            local duration, expires = safeTiming(aura)
-            if hasNoTimer(duration, expires) then return end
-            pureCC.spellId, pureCC.duration, pureCC.expires = spellId, duration, expires
+            pureCC.spellId = spellId
             stop = true
         end)
         if stop then return true end
@@ -405,7 +334,7 @@ end
 
 -- Dispellable non-CC debuff. Skips dispellable CC (which owns its own slot).
 local function collectDispel(unit)
-    dispel.spellId, dispel.duration, dispel.expires = nil, nil, nil
+    dispel.spellId = nil
     AuraUtil.ForEachAura(unit, "HARMFUL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
         local stop = false
         pcall(function()
@@ -414,27 +343,24 @@ local function collectDispel(unit)
             if instanceId and dispellableCCInstances[instanceId] then return end
             local spellId = safeSpellId(aura)
             if not spellId then return end
-            local duration, expires = safeTiming(aura)
-            if hasNoTimer(duration, expires) then return end
-            dispel.spellId, dispel.duration, dispel.expires = spellId, duration, expires
+            dispel.spellId = spellId
             stop = true
         end)
         if stop then return true end
     end, true)
 end
 
+-- BIG_DEFENSIVE is Blizzard's curated list of "oh shit" defensive cooldowns.
+-- We display whatever Blizzard already flags as big-defensive, no extra filter.
 local function collectDefensive(unit)
-    defensive.spellId, defensive.duration, defensive.expires = nil, nil, nil
+    defensive.spellId = nil
     AuraUtil.ForEachAura(unit, "HELPFUL|BIG_DEFENSIVE", nil, function(aura)
         local stop = false
         pcall(function()
             if isRestrictedAura(aura) then return end
             local spellId = safeSpellId(aura)
             if not spellId then return end
-            local duration, expires = safeTiming(aura)
-            if hasNoTimer(duration, expires) then return end
-            if exceedsCap(duration, MAX_DEFENSIVE_DURATION) then return end
-            defensive.spellId, defensive.duration, defensive.expires = spellId, duration, expires
+            defensive.spellId = spellId
             stop = true
         end)
         if stop then return true end
@@ -465,7 +391,7 @@ local function applyTest(frame)
     local ind = frame.cleanIndicators
     if not ind then return end
     local showHighlight = HRF.GetSectionShow("highlight")
-    local spec = HRF.GetSpecConfig and HRF.GetSpecConfig(activeSpec)
+    local spec = activeSpecConfig
 
     -- Prefer the user's configured spell order so test mode reflects their setup.
     local entries = {}
@@ -486,7 +412,7 @@ local function applyTest(frame)
     for i, slot in ipairs(ind.highlights) do
         local entry = entries[i]
         if entry then
-            showSlot(slot.icon, slot.glow, entry.spellId, 15, GetTime() + 10, entry.useGlow)
+            showSlot(slot.icon, slot.glow, entry.spellId, entry.useGlow)
         else
             hideSlot(slot.icon, slot.glow)
         end
@@ -500,23 +426,23 @@ local function applyTest(frame)
     local glowDispel = HRF.GetSectionGlow("dispel")
 
     if showCC then
-        showSlot(ind.ccIcon, ind.ccGlow, TEST_CC, 8, GetTime() + 6, glowCC)
+        showSlot(ind.ccIcon, ind.ccGlow, TEST_CC, glowCC)
     else
         hideSlot(ind.ccIcon, ind.ccGlow)
     end
     if showPureCC then
-        showSlot(ind.pureCCIcon, ind.pureCCGlow, TEST_PURE_CC, 6, GetTime() + 4, glowPureCC)
+        showSlot(ind.pureCCIcon, ind.pureCCGlow, TEST_PURE_CC, glowPureCC)
     else
         hideSlot(ind.pureCCIcon, ind.pureCCGlow)
     end
     if showDispel then
-        showSlot(ind.dispelIcon, ind.dispelGlow, TEST_DISPEL, 12, GetTime() + 9, glowDispel)
+        showSlot(ind.dispelIcon, ind.dispelGlow, TEST_DISPEL, glowDispel)
     else
         hideSlot(ind.dispelIcon, ind.dispelGlow)
     end
 
     if HRF.GetSectionShow("defensive") then
-        showSlot(ind.defensiveIcon, ind.defensiveGlow, TEST_DEFENSIVE, 8, GetTime() + 5, HRF.GetSectionGlow("defensive"))
+        showSlot(ind.defensiveIcon, ind.defensiveGlow, TEST_DEFENSIVE, HRF.GetSectionGlow("defensive"))
     else
         hideSlot(ind.defensiveIcon, ind.defensiveGlow)
     end
@@ -526,7 +452,6 @@ end
 local function updateFrame(frame)
     local ind = frame.cleanIndicators
     if not ind then return end
-    applyColors(ind)
     if testMode then applyTest(frame); return end
     if not isHealer then hideAll(ind); return end
     local unit = frame.displayedUnit or frame.unit
@@ -558,30 +483,30 @@ local function updateFrame(frame)
     for i, slot in ipairs(ind.highlights) do
         local h = highlights[i]
         if h then
-            showSlot(slot.icon, slot.glow, h.spellId, h.duration, h.expires, h.useGlow)
+            showSlot(slot.icon, slot.glow, h.spellId, h.useGlow)
         else
             hideSlot(slot.icon, slot.glow)
         end
     end
 
     if showCC and cc.spellId then
-        showSlot(ind.ccIcon, ind.ccGlow, cc.spellId, cc.duration, cc.expires, glowCC)
+        showSlot(ind.ccIcon, ind.ccGlow, cc.spellId, glowCC)
     else
         hideSlot(ind.ccIcon, ind.ccGlow)
     end
     if showPureCC and pureCC.spellId then
-        showSlot(ind.pureCCIcon, ind.pureCCGlow, pureCC.spellId, pureCC.duration, pureCC.expires, glowPureCC)
+        showSlot(ind.pureCCIcon, ind.pureCCGlow, pureCC.spellId, glowPureCC)
     else
         hideSlot(ind.pureCCIcon, ind.pureCCGlow)
     end
     if showDispel and dispel.spellId then
-        showSlot(ind.dispelIcon, ind.dispelGlow, dispel.spellId, dispel.duration, dispel.expires, glowDispel)
+        showSlot(ind.dispelIcon, ind.dispelGlow, dispel.spellId, glowDispel)
     else
         hideSlot(ind.dispelIcon, ind.dispelGlow)
     end
 
     if defensive.spellId then
-        showSlot(ind.defensiveIcon, ind.defensiveGlow, defensive.spellId, defensive.duration, defensive.expires, glowDef)
+        showSlot(ind.defensiveIcon, ind.defensiveGlow, defensive.spellId, glowDef)
     else
         hideSlot(ind.defensiveIcon, ind.defensiveGlow)
     end
@@ -589,34 +514,97 @@ local function updateFrame(frame)
     layoutBottomLeftGrid(frame)
 end
 
-local function refreshFrames()
+-- Index the frame under every token that resolves to the same unit:
+-- * frame.unit (e.g. "raid5") -- the stable group slot
+-- * frame.displayedUnit (e.g. "vehicle5") -- what the frame actually shows when the
+--   player is in a vehicle or otherwise redirected
+-- * "player" when the frame is the local player -- UNIT_AURA for self fires with
+--   arg1="player" even when the frame is showing raidN/partyN
+-- Missing any of these paths causes intermittent UNIT_AURA misses.
+local function registerFrameUnit(frame)
+    local unit = frame.unit
+    local displayed = frame.displayedUnit
+    if unit then framesByUnit[unit] = frame end
+    if displayed and displayed ~= unit then framesByUnit[displayed] = frame end
+    local probe = displayed or unit
+    if probe and UnitIsUnit(probe, "player") then
+        framesByUnit["player"] = frame
+    end
+end
+
+local function rebuildFramesByUnit()
+    for k in pairs(framesByUnit) do framesByUnit[k] = nil end
     for frame in pairs(trackedFrames) do
         if not frame:IsForbidden() then
-            layoutIndicators(frame)
+            registerFrameUnit(frame)
+        end
+    end
+end
+
+-- Used only for full-group events (roster/spec/test/setting change). Per-unit
+-- UNIT_AURA takes the fast path via updateFrame(framesByUnit[unit]).
+local function refreshAllFrames()
+    for frame in pairs(trackedFrames) do
+        if not frame:IsForbidden() then
             updateFrame(frame)
         end
     end
 end
 
+local pendingRefresh = false
+local function scheduleRefreshAllFrames()
+    if pendingRefresh then return end
+    pendingRefresh = true
+    C_Timer.After(0, function()
+        pendingRefresh = false
+        rebuildFramesByUnit()
+        refreshAllFrames()
+    end)
+end
+
 local function refreshSpec()
     local id = HRF.GetActiveSpec and HRF.GetActiveSpec()
-    activeSpec = id
     isHealer = HRF.IsTrackedSpec and HRF.IsTrackedSpec(id) or false
+    activeSpecConfig = (isHealer and HRF.GetSpecConfig) and HRF.GetSpecConfig(id) or nil
 end
 
 if HRF.Subscribe then
-    HRF.Subscribe(function() refreshFrames() end)
+    HRF.Subscribe(function()
+        -- Settings changed: recolor (cheap) and schedule a coalesced full refresh.
+        applyColorsAllFrames()
+        scheduleRefreshAllFrames()
+    end)
 end
 
 local function onSetup(frame)
+    local wasNew = not frame.cleanIndicators
     buildIndicators(frame)
+    if wasNew then
+        local ind = frame.cleanIndicators
+        if ind then applyColors(ind) end
+    end
     layoutIndicators(frame)
+    registerFrameUnit(frame)
     updateFrame(frame)
 end
 
 hooksecurefunc("DefaultCompactUnitFrameSetup", onSetup)
 hooksecurefunc("DefaultCompactMiniFrameSetup", onSetup)
-hooksecurefunc("CompactUnitFrame_UpdateAll", onSetup)
+-- Hook CompactUnitFrame_SetUnit so we track unit reassignments without paying
+-- the full CompactUnitFrame_UpdateAll cost on every role/flag/range change.
+hooksecurefunc("CompactUnitFrame_SetUnit", function(frame)
+    if not frame or frame:IsForbidden() then return end
+    if not frame.cleanIndicators then return end
+    -- Remove stale unit mappings before re-registering; a frame may have shown
+    -- another unit before this reassignment.
+    for k, v in pairs(framesByUnit) do
+        if v == frame then framesByUnit[k] = nil end
+    end
+    registerFrameUnit(frame)
+    -- Re-layout in case the frame's size was zero at initial setup or has changed.
+    layoutIndicators(frame)
+    updateFrame(frame)
+end)
 
 -- Suppresses Blizzard's stock debuff row (bottom-right) and centered big-defensive
 -- icon so they don't overlap our custom overlays.
@@ -638,12 +626,24 @@ eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-eventFrame:SetScript("OnEvent", function(_, event, arg1)
+eventFrame:RegisterEvent("UNIT_AURA")
+eventFrame:RegisterEvent("UI_SCALE_CHANGED")
+eventFrame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+-- UNIT_AURA stays registered globally, but the handler exits in O(1) for units we
+-- don't track (nameplates, boss, target, focus, pets, arena). Only party/raid slots
+-- ever find a matching frame and run updateFrame.
+eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
     if event == "ADDON_LOADED" then
         if arg1 == "HealerRaidFrames" and HRF.EnsureInitialized then
             HRF.EnsureInitialized()
+        end
+        return
+    end
+    if event == "UNIT_AURA" then
+        local frame = framesByUnit[arg1]
+        if frame and not frame:IsForbidden() then
+            updateFrame(frame)
         end
         return
     end
@@ -652,6 +652,14 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
     end
     if event == "PLAYER_LOGIN" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
         refreshSpec()
+    end
+    if event == "PLAYER_ENTERING_WORLD" or event == "UI_SCALE_CHANGED" or event == "EDIT_MODE_LAYOUTS_UPDATED" then
+        -- Raid profile / scale changed: re-run layout so icon sizes match the new frame height.
+        layoutAllFrames()
+    end
+    if event == "GROUP_ROSTER_UPDATE" then
+        scheduleRefreshAllFrames()
+        return
     end
     if event == "PLAYER_LOGIN" and HealerRaidFramesDB and not HealerRaidFramesDB.introShown then
         HealerRaidFramesDB.introShown = true
@@ -662,7 +670,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
         print("  |cffffd100Bottom-left|r: dispellable CC, non-dispellable CC, and dispellable debuffs (grows left to right)")
         print("Type |cff33ff99/hrf|r to configure or disable any of these.")
     end
-    refreshFrames()
+    scheduleRefreshAllFrames()
 end)
 
 function HRF.IsTestModeOn()
@@ -672,6 +680,6 @@ end
 function HRF.ToggleTestMode()
     testMode = not testMode
     print("|cff33ff99HealerRaidFrames|r: test mode " .. (testMode and "ON" or "OFF"))
-    refreshFrames()
+    scheduleRefreshAllFrames()
     return testMode
 end
