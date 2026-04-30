@@ -235,6 +235,16 @@ local function layoutIndicators(frame)
     styleCountdown(ind.defensiveIcon.countdown, defSize)
 end
 
+-- Restricted "private auras" come back from ForEachAura with most fields gated;
+-- accessing those fields can leak the "secret keys" error past pcall. Blizzard's
+-- own aura processors bail when icon is unreadable (see TargetFrameMixin:ProcessAura).
+local function isRestrictedAura(aura)
+    if not aura then return true end
+    local ok, icon = pcall(function() return aura.icon end)
+    if not ok then return true end
+    return icon == nil
+end
+
 local function safeSpellId(aura)
     if not aura then return nil end
     local ok, value = pcall(function() return aura.spellId end)
@@ -282,12 +292,15 @@ local function collectHighlights(unit)
     if not spec then return end
 
     AuraUtil.ForEachAura(unit, "HELPFUL|PLAYER", nil, function(aura)
-        if not safeBool(aura, "isFromPlayerOrPlayerPet") then return end
-        local spellId = safeSpellId(aura)
-        if spellId and spec.show[spellId] and not auraByID[spellId] then
-            local duration, expires = safeTiming(aura)
-            auraByID[spellId] = { duration = duration, expires = expires }
-        end
+        pcall(function()
+            if isRestrictedAura(aura) then return end
+            if not safeBool(aura, "isFromPlayerOrPlayerPet") then return end
+            local spellId = safeSpellId(aura)
+            if spellId and spec.show[spellId] and not auraByID[spellId] then
+                local duration, expires = safeTiming(aura)
+                auraByID[spellId] = { duration = duration, expires = expires }
+            end
+        end)
     end, true)
 
     for _, spellId in ipairs(spec.order) do
@@ -307,37 +320,52 @@ end
 local function collectCC(unit)
     cc.spellId, cc.duration, cc.expires = nil, nil, nil
     AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
-        local spellId = safeSpellId(aura)
-        if not spellId then return end
-        local duration, expires = safeTiming(aura)
-        if hasNoTimer(duration, expires) then return end
-        cc.spellId, cc.duration, cc.expires = spellId, duration, expires
-        return true
+        local stop = false
+        pcall(function()
+            if isRestrictedAura(aura) then return end
+            local spellId = safeSpellId(aura)
+            if not spellId then return end
+            local duration, expires = safeTiming(aura)
+            if hasNoTimer(duration, expires) then return end
+            cc.spellId, cc.duration, cc.expires = spellId, duration, expires
+            stop = true
+        end)
+        if stop then return true end
     end, true)
 end
 
 local function collectDispel(unit)
     dispel.spellId, dispel.duration, dispel.expires = nil, nil, nil
     AuraUtil.ForEachAura(unit, "HARMFUL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
-        local spellId = safeSpellId(aura)
-        if not spellId then return end
-        local duration, expires = safeTiming(aura)
-        if hasNoTimer(duration, expires) then return end
-        dispel.spellId, dispel.duration, dispel.expires = spellId, duration, expires
-        return true
+        local stop = false
+        pcall(function()
+            if isRestrictedAura(aura) then return end
+            local spellId = safeSpellId(aura)
+            if not spellId then return end
+            local duration, expires = safeTiming(aura)
+            if hasNoTimer(duration, expires) then return end
+            dispel.spellId, dispel.duration, dispel.expires = spellId, duration, expires
+            stop = true
+        end)
+        if stop then return true end
     end, true)
 end
 
 local function collectDefensive(unit)
     defensive.spellId, defensive.duration, defensive.expires = nil, nil, nil
     AuraUtil.ForEachAura(unit, "HELPFUL|BIG_DEFENSIVE", nil, function(aura)
-        local spellId = safeSpellId(aura)
-        if not spellId then return end
-        local duration, expires = safeTiming(aura)
-        if hasNoTimer(duration, expires) then return end
-        if exceedsCap(duration, MAX_DEFENSIVE_DURATION) then return end
-        defensive.spellId, defensive.duration, defensive.expires = spellId, duration, expires
-        return true
+        local stop = false
+        pcall(function()
+            if isRestrictedAura(aura) then return end
+            local spellId = safeSpellId(aura)
+            if not spellId then return end
+            local duration, expires = safeTiming(aura)
+            if hasNoTimer(duration, expires) then return end
+            if exceedsCap(duration, MAX_DEFENSIVE_DURATION) then return end
+            defensive.spellId, defensive.duration, defensive.expires = spellId, duration, expires
+            stop = true
+        end)
+        if stop then return true end
     end, true)
 end
 
