@@ -518,11 +518,26 @@ hooksecurefunc("DefaultCompactUnitFrameSetup", onSetup)
 hooksecurefunc("DefaultCompactMiniFrameSetup", onSetup)
 hooksecurefunc("CompactUnitFrame_UpdateAll", onSetup)
 
+-- Suppresses Blizzard's stock debuff row (bottom-right) and centered big-defensive
+-- icon so they don't overlap our custom overlays.
+local SUPPRESSED_CVARS = { "raidFramesDisplayDebuffs", "raidFramesCenterBigDefensive" }
+
+local function enforceCVars()
+    if InCombatLockdown and InCombatLockdown() then return false end
+    for _, cvar in ipairs(SUPPRESSED_CVARS) do
+        if GetCVar(cvar) ~= "0" then
+            pcall(SetCVar, cvar, "0")
+        end
+    end
+    return true
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
@@ -531,6 +546,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             HRF.EnsureInitialized()
         end
         return
+    end
+    if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" then
+        enforceCVars()
     end
     if event == "PLAYER_LOGIN" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
         refreshSpec()
