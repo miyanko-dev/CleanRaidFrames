@@ -83,6 +83,7 @@ local GLOBAL_DEFAULTS = {
     highlightGlowCustom = false,
     defensive = { show = true, glow = true, glowCustom = true,  color = { 0.1, 1.0, 0.1 }, scale = DEFAULT_SCALE },
     cc        = { show = true, glow = true, glowCustom = true,  color = { 1.0, 0.1, 0.1 }, scale = DEFAULT_SCALE },
+    pureCC    = { show = true, glow = true, glowCustom = true,  color = { 1.0, 0.6, 0.0 }, scale = DEFAULT_SCALE },
     dispel    = { show = true, glow = true, glowCustom = true,  color = { 0.4, 0.6, 1.0 }, scale = DEFAULT_SCALE },
 }
 
@@ -204,6 +205,7 @@ function HRF.EnsureInitialized()
     end
     ensureSection(db, "defensive")
     ensureSection(db, "cc")
+    ensureSection(db, "pureCC")
     ensureSection(db, "dispel")
 end
 

@@ -15,8 +15,9 @@ local GHOST_ALPHA = 0.35
 
 local panel, scroll, content, scrollBar
 local header, hint, testButton
-local buffsSection, defensiveSection, ccSection, dispelSection
+local buffsSection, defensiveSection, ccSection, pureCCSection, dispelSection
 local buffsHint, buffListSubtitle
+local buffsDisabledNotice
 local dropIndicator
 local rowPool = {}
 local activeRows = {}
@@ -525,77 +526,98 @@ local function refresh()
     local specName = specId and HRF.SPEC_NAMES[specId] or nil
     local tracked = specId and HRF.IsTrackedSpec(specId) or false
 
-    refreshSection(buffsSection)
     refreshSection(defensiveSection)
     refreshSection(ccSection)
+    refreshSection(pureCCSection)
     refreshSection(dispelSection)
 
+    if tracked then
+        refreshSection(buffsSection)
+    end
+
+    local anchorAfterBuffs
     if not tracked then
         header:SetText("Healer Raid Frames")
         hint:SetText("Switch to a supported healing specialization to configure its buff list.\nSupported: Discipline / Holy Priest, Holy Paladin, Restoration Shaman,\nMistweaver Monk, Restoration Druid, Preservation Evoker, Augmentation Evoker.")
-        buffsSection.resetButton:Disable()
-        buffsHint:SetText("")
+
+        -- Collapse the whole Healer Buff Display section into a gray disabled notice.
+        buffsSection.subtitle:Hide()
+        buffsSection.row:Hide()
         buffListSubtitle:Hide()
+        buffsHint:SetText("")
+        buffsHint:Hide()
+
+        buffsDisabledNotice:ClearAllPoints()
+        buffsDisabledNotice:SetPoint("TOPLEFT", buffsSection.title, "BOTTOMLEFT", 0, -SUBTITLE_GAP)
+        buffsDisabledNotice:Show()
+        anchorAfterBuffs = buffsDisabledNotice
     else
         header:SetText("Healer Raid Frames: " .. specName)
         hint:SetText("")
+
+        buffsDisabledNotice:Hide()
+        buffsSection.subtitle:Show()
+        buffsSection.row:Show()
+        buffsHint:Show()
+        buffListSubtitle:Show()
+
         buffsHint:SetText("Display buffs on the raid frame in the top right corner. Glow adds a proc glow. "
             .. "Drag rows to change order. Top to bottom maps to right to left. "
             .. "Only the first " .. tostring(HRF.MAX_HIGHLIGHT_SLOTS) .. " buffs are shown.")
         buffsSection.resetButton:Enable()
-        buffListSubtitle:Show()
-    end
 
-    buffListSubtitle:ClearAllPoints()
-    buffListSubtitle:SetPoint("TOPLEFT", buffsSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
+        buffListSubtitle:ClearAllPoints()
+        buffListSubtitle:SetPoint("TOPLEFT", buffsSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
 
-    buffsHint:ClearAllPoints()
-    buffsHint:SetPoint("TOPLEFT", buffListSubtitle, "BOTTOMLEFT", 0, -6)
-    buffsHint:SetPoint("RIGHT", content, "RIGHT", -CONTENT_PAD, 0)
+        buffsHint:ClearAllPoints()
+        buffsHint:SetPoint("TOPLEFT", buffListSubtitle, "BOTTOMLEFT", 0, -6)
+        buffsHint:SetPoint("RIGHT", content, "RIGHT", -CONTENT_PAD, 0)
 
-    local spec = tracked and HRF.GetSpecConfig(specId) or nil
-    local order = spec and spec.order or {}
+        local spec = HRF.GetSpecConfig(specId)
+        local order = spec and spec.order or {}
 
-    local previous
-    for index, spellId in ipairs(order) do
-        local row = acquireRow(content)
-        row:ClearAllPoints()
-        if previous then
-            row:SetPoint("TOPLEFT", previous, "BOTTOMLEFT", 0, -ROW_SPACING)
-            row:SetPoint("TOPRIGHT", previous, "BOTTOMRIGHT", 0, -ROW_SPACING)
-        else
-            row:SetPoint("TOPLEFT", buffsHint, "BOTTOMLEFT", 0, -SUBTITLE_GAP)
-            row:SetPoint("RIGHT", content, "RIGHT", -CONTENT_PAD, 0)
+        local previous
+        for index, spellId in ipairs(order) do
+            local row = acquireRow(content)
+            row:ClearAllPoints()
+            if previous then
+                row:SetPoint("TOPLEFT", previous, "BOTTOMLEFT", 0, -ROW_SPACING)
+                row:SetPoint("TOPRIGHT", previous, "BOTTOMRIGHT", 0, -ROW_SPACING)
+            else
+                row:SetPoint("TOPLEFT", buffsHint, "BOTTOMLEFT", 0, -SUBTITLE_GAP)
+                row:SetPoint("RIGHT", content, "RIGHT", -CONTENT_PAD, 0)
+            end
+
+            row._specId = specId
+            row._spellId = spellId
+            row.position:SetText(tostring(index))
+            row.icon:SetTexture(spellTexture(spellId) or 134400)
+            row.label:SetText(spellName(spellId) .. "  |cff888888(" .. spellId .. ")|r")
+
+            row.showCheck:SetChecked(spec.show[spellId] == true)
+            row.glowCheck:SetChecked(spec.glow[spellId] == true)
+            updateGlowEnabled(row.glowCheck, row.showCheck)
+
+            row.showCheck:SetScript("OnClick", function(self)
+                suppressRefresh = true
+                HRF.SetShow(specId, spellId, self:GetChecked())
+                suppressRefresh = false
+                updateGlowEnabled(row.glowCheck, row.showCheck)
+            end)
+
+            row.glowCheck:SetScript("OnClick", function(self)
+                suppressRefresh = true
+                HRF.SetGlow(specId, spellId, self:GetChecked())
+                suppressRefresh = false
+            end)
+
+            activeRows[#activeRows + 1] = row
+            previous = row
         end
 
-        row._specId = specId
-        row._spellId = spellId
-        row.position:SetText(tostring(index))
-        row.icon:SetTexture(spellTexture(spellId) or 134400)
-        row.label:SetText(spellName(spellId) .. "  |cff888888(" .. spellId .. ")|r")
-
-        row.showCheck:SetChecked(spec.show[spellId] == true)
-        row.glowCheck:SetChecked(spec.glow[spellId] == true)
-        updateGlowEnabled(row.glowCheck, row.showCheck)
-
-        row.showCheck:SetScript("OnClick", function(self)
-            suppressRefresh = true
-            HRF.SetShow(specId, spellId, self:GetChecked())
-            suppressRefresh = false
-            updateGlowEnabled(row.glowCheck, row.showCheck)
-        end)
-
-        row.glowCheck:SetScript("OnClick", function(self)
-            suppressRefresh = true
-            HRF.SetGlow(specId, spellId, self:GetChecked())
-            suppressRefresh = false
-        end)
-
-        activeRows[#activeRows + 1] = row
-        previous = row
+        anchorAfterBuffs = previous or buffListSubtitle
     end
 
-    local anchorAfterBuffs = previous or buffListSubtitle
     defensiveSection.title:ClearAllPoints()
     defensiveSection.title:SetPoint("TOPLEFT", anchorAfterBuffs, "BOTTOMLEFT", 0, -SECTION_GAP)
 
@@ -669,6 +691,13 @@ local function build()
         refresh()
     end)
 
+    -- Shown in place of the buff controls when the player is not in a healing spec.
+    buffsDisabledNotice = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    buffsDisabledNotice:SetText("Healer Buff Display disabled. No Heal Spec active.")
+    buffsDisabledNotice:SetTextColor(COLOR_DISABLED_R, COLOR_DISABLED_G, COLOR_DISABLED_B)
+    buffsDisabledNotice:SetJustifyH("LEFT")
+    buffsDisabledNotice:Hide()
+
     buffListSubtitle = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     buffListSubtitle:SetText("Buff Settings")
 
@@ -684,7 +713,7 @@ local function build()
         refresh()
     end)
 
-    ccSection = buildSectionShell(content, "Dispellable CC Debuff Icon (Bottom Left Corner)", "cc")
+    ccSection = buildSectionShell(content, "Dispellable CC Debuff Icon (Bottom Left Corner, Slot 1)", "cc")
     ccSection.title:ClearAllPoints()
     ccSection.title:SetPoint("TOPLEFT", defensiveSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
     ccSection.resetButton:SetScript("OnClick", function()
@@ -692,9 +721,17 @@ local function build()
         refresh()
     end)
 
-    dispelSection = buildSectionShell(content, "Dispellable Debuff Icon (Bottom Left Corner)", "dispel")
+    pureCCSection = buildSectionShell(content, "Non-Dispellable CC Debuff Icon (Bottom Left Corner, Slot 2)", "pureCC")
+    pureCCSection.title:ClearAllPoints()
+    pureCCSection.title:SetPoint("TOPLEFT", ccSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
+    pureCCSection.resetButton:SetScript("OnClick", function()
+        HRF.ResetSection("pureCC")
+        refresh()
+    end)
+
+    dispelSection = buildSectionShell(content, "Dispellable Debuff Icon (Bottom Left Corner, Slot 3)", "dispel")
     dispelSection.title:ClearAllPoints()
-    dispelSection.title:SetPoint("TOPLEFT", ccSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
+    dispelSection.title:SetPoint("TOPLEFT", pureCCSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
     dispelSection.resetButton:SetScript("OnClick", function()
         HRF.ResetSection("dispel")
         refresh()

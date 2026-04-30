@@ -153,6 +153,7 @@ local function buildIndicators(frame)
     end
 
     local ccIcon = createIcon(overlay, false)
+    local pureCCIcon = createIcon(overlay, false)
     local dispelIcon = createIcon(overlay, false)
     local defensiveIcon = createIcon(overlay, false)
 
@@ -160,6 +161,8 @@ local function buildIndicators(frame)
         highlights = highlights,
         ccIcon = ccIcon,
         ccGlow = createGlow(overlay, ccIcon),
+        pureCCIcon = pureCCIcon,
+        pureCCGlow = createGlow(overlay, pureCCIcon),
         dispelIcon = dispelIcon,
         dispelGlow = createGlow(overlay, dispelIcon),
         defensiveIcon = defensiveIcon,
@@ -178,6 +181,9 @@ local function applyColors(ind)
     local cCustom = HRF.GetSectionGlowCustom("cc")
     local cr, cg, cb = HRF.GetSectionColor("cc")
     applyGlowColor(ind.ccGlow, cr, cg, cb, cCustom)
+    local pcCustom = HRF.GetSectionGlowCustom("pureCC")
+    local pcr, pcg, pcb = HRF.GetSectionColor("pureCC")
+    applyGlowColor(ind.pureCCGlow, pcr, pcg, pcb, pcCustom)
     local pCustom = HRF.GetSectionGlowCustom("dispel")
     local pr, pg, pb = HRF.GetSectionColor("dispel")
     applyGlowColor(ind.dispelGlow, pr, pg, pb, pCustom)
@@ -215,15 +221,16 @@ local function layoutIndicators(frame)
 
     local ccSize = sizeFor(frameHeight, "cc")
     ind.ccIcon:SetSize(ccSize, ccSize)
-    ind.ccIcon:ClearAllPoints()
-    ind.ccIcon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", FRAME_INSET, FRAME_INSET)
     ind.ccGlow:SetSize(ccSize * GLOW_SCALE, ccSize * GLOW_SCALE)
     styleCountdown(ind.ccIcon.countdown, ccSize)
 
+    local pureCCSize = sizeFor(frameHeight, "pureCC")
+    ind.pureCCIcon:SetSize(pureCCSize, pureCCSize)
+    ind.pureCCGlow:SetSize(pureCCSize * GLOW_SCALE, pureCCSize * GLOW_SCALE)
+    styleCountdown(ind.pureCCIcon.countdown, pureCCSize)
+
     local dispelSize = sizeFor(frameHeight, "dispel")
     ind.dispelIcon:SetSize(dispelSize, dispelSize)
-    ind.dispelIcon:ClearAllPoints()
-    ind.dispelIcon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", FRAME_INSET, FRAME_INSET)
     ind.dispelGlow:SetSize(dispelSize * GLOW_SCALE, dispelSize * GLOW_SCALE)
     styleCountdown(ind.dispelIcon.countdown, dispelSize)
 
@@ -233,6 +240,34 @@ local function layoutIndicators(frame)
     ind.defensiveIcon:SetPoint("TOPLEFT", frame, "TOPLEFT", FRAME_INSET, -FRAME_INSET)
     ind.defensiveGlow:SetSize(defSize * GLOW_SCALE, defSize * GLOW_SCALE)
     styleCountdown(ind.defensiveIcon.countdown, defSize)
+end
+
+-- Arranges the bottom-left debuff slots left→right in fixed priority order:
+-- 1) dispellable CC, 2) pure CC, 3) dispellable debuff. Only shown icons take a slot.
+local function layoutBottomLeftGrid(frame)
+    local ind = frame.cleanIndicators
+    if not ind then return end
+    local entries = {
+        { icon = ind.ccIcon },
+        { icon = ind.pureCCIcon },
+        { icon = ind.dispelIcon },
+    }
+    local previous
+    for _, entry in ipairs(entries) do
+        local icon = entry.icon
+        icon:ClearAllPoints()
+        if icon:IsShown() then
+            if previous then
+                icon:SetPoint("BOTTOMLEFT", previous, "BOTTOMRIGHT", ICON_SPACING, 0)
+            else
+                icon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", FRAME_INSET, FRAME_INSET)
+            end
+            previous = icon
+        else
+            -- Park hidden icons at the anchor so the next Show picks up a valid point.
+            icon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", FRAME_INSET, FRAME_INSET)
+        end
+    end
 end
 
 -- Restricted "private auras" come back from ForEachAura with most fields gated;
@@ -249,6 +284,12 @@ local function safeSpellId(aura)
     if not aura then return nil end
     local ok, value = pcall(function() return aura.spellId end)
     return ok and type(value) == "number" and value or nil
+end
+
+local function safeAuraInstanceID(aura)
+    if not aura then return nil end
+    local ok, value = pcall(function() return aura.auraInstanceID end)
+    return ok and value or nil
 end
 
 local function safeBool(aura, field)
@@ -280,9 +321,11 @@ end
 
 local highlights = {}
 local cc = {}
+local pureCC = {}
 local dispel = {}
 local defensive = {}
 local auraByID = {}
+local dispellableCCInstances = {}
 
 local function collectHighlights(unit)
     for i = #highlights, 1, -1 do highlights[i] = nil end
@@ -317,29 +360,58 @@ local function collectHighlights(unit)
     end
 end
 
+-- Captures the first dispellable CC aura and records every dispellable-CC auraInstanceID
+-- in dispellableCCInstances so the other passes can skip them (an aura can match
+-- multiple filters, e.g. a dispellable CC also passes HARMFUL|CROWD_CONTROL alone).
 local function collectCC(unit)
     cc.spellId, cc.duration, cc.expires = nil, nil, nil
+    for k in pairs(dispellableCCInstances) do dispellableCCInstances[k] = nil end
     AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
-        local stop = false
         pcall(function()
             if isRestrictedAura(aura) then return end
             local spellId = safeSpellId(aura)
             if not spellId then return end
             local duration, expires = safeTiming(aura)
             if hasNoTimer(duration, expires) then return end
-            cc.spellId, cc.duration, cc.expires = spellId, duration, expires
+            local instanceId = safeAuraInstanceID(aura)
+            if instanceId then dispellableCCInstances[instanceId] = true end
+            if not cc.spellId then
+                cc.spellId, cc.duration, cc.expires = spellId, duration, expires
+            end
+        end)
+    end, true)
+end
+
+-- Pure CC = crowd-control that is NOT dispellable. Skips anything already captured
+-- as dispellable CC so we never show the same icon in two adjacent slots.
+local function collectPureCC(unit)
+    pureCC.spellId, pureCC.duration, pureCC.expires = nil, nil, nil
+    AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL", nil, function(aura)
+        local stop = false
+        pcall(function()
+            if isRestrictedAura(aura) then return end
+            local instanceId = safeAuraInstanceID(aura)
+            if instanceId and dispellableCCInstances[instanceId] then return end
+            local spellId = safeSpellId(aura)
+            if not spellId then return end
+            local duration, expires = safeTiming(aura)
+            if hasNoTimer(duration, expires) then return end
+            pureCC.spellId, pureCC.duration, pureCC.expires = spellId, duration, expires
             stop = true
         end)
         if stop then return true end
     end, true)
 end
 
+-- Dispellable non-CC debuff. Skips dispellable CC (which owns its own slot).
 local function collectDispel(unit)
     dispel.spellId, dispel.duration, dispel.expires = nil, nil, nil
     AuraUtil.ForEachAura(unit, "HARMFUL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
         local stop = false
         pcall(function()
             if isRestrictedAura(aura) then return end
+            local instanceId = safeAuraInstanceID(aura)
+            if instanceId and dispellableCCInstances[instanceId] then return end
             local spellId = safeSpellId(aura)
             if not spellId then return end
             local duration, expires = safeTiming(aura)
@@ -372,6 +444,7 @@ end
 local function hideAll(ind)
     for _, slot in ipairs(ind.highlights) do hideSlot(slot.icon, slot.glow) end
     hideSlot(ind.ccIcon, ind.ccGlow)
+    hideSlot(ind.pureCCIcon, ind.pureCCGlow)
     hideSlot(ind.dispelIcon, ind.dispelGlow)
     hideSlot(ind.defensiveIcon, ind.defensiveGlow)
 end
@@ -383,11 +456,14 @@ local TEST_FALLBACK_HIGHLIGHTS = {
     { spellId = 8936 },   -- Regrowth
     { spellId = 48438 },  -- Wild Growth
 }
-local TEST_CC = 118                       -- Polymorph
+local TEST_CC = 118                       -- Polymorph (dispellable CC)
+local TEST_PURE_CC = 408                  -- Kidney Shot (non-dispellable CC)
 local TEST_DISPEL = 589                   -- Shadow Word: Pain
 local TEST_DEFENSIVE = 31850              -- Ardent Defender
 
-local function applyTest(ind)
+local function applyTest(frame)
+    local ind = frame.cleanIndicators
+    if not ind then return end
     local showHighlight = HRF.GetSectionShow("highlight")
     local spec = HRF.GetSpecConfig and HRF.GetSpecConfig(activeSpec)
 
@@ -418,17 +494,24 @@ local function applyTest(ind)
 
     local showCC = HRF.GetSectionShow("cc")
     local glowCC = HRF.GetSectionGlow("cc")
+    local showPureCC = HRF.GetSectionShow("pureCC")
+    local glowPureCC = HRF.GetSectionGlow("pureCC")
     local showDispel = HRF.GetSectionShow("dispel")
     local glowDispel = HRF.GetSectionGlow("dispel")
 
     if showCC then
         showSlot(ind.ccIcon, ind.ccGlow, TEST_CC, 8, GetTime() + 6, glowCC)
-        hideSlot(ind.dispelIcon, ind.dispelGlow)
-    elseif showDispel then
-        hideSlot(ind.ccIcon, ind.ccGlow)
-        showSlot(ind.dispelIcon, ind.dispelGlow, TEST_DISPEL, 12, GetTime() + 9, glowDispel)
     else
         hideSlot(ind.ccIcon, ind.ccGlow)
+    end
+    if showPureCC then
+        showSlot(ind.pureCCIcon, ind.pureCCGlow, TEST_PURE_CC, 6, GetTime() + 4, glowPureCC)
+    else
+        hideSlot(ind.pureCCIcon, ind.pureCCGlow)
+    end
+    if showDispel then
+        showSlot(ind.dispelIcon, ind.dispelGlow, TEST_DISPEL, 12, GetTime() + 9, glowDispel)
+    else
         hideSlot(ind.dispelIcon, ind.dispelGlow)
     end
 
@@ -437,13 +520,14 @@ local function applyTest(ind)
     else
         hideSlot(ind.defensiveIcon, ind.defensiveGlow)
     end
+    layoutBottomLeftGrid(frame)
 end
 
 local function updateFrame(frame)
     local ind = frame.cleanIndicators
     if not ind then return end
     applyColors(ind)
-    if testMode then applyTest(ind); return end
+    if testMode then applyTest(frame); return end
     if not isHealer then hideAll(ind); return end
     local unit = frame.displayedUnit or frame.unit
     if not unit or not UnitExists(unit) then hideAll(ind); return end
@@ -453,11 +537,21 @@ local function updateFrame(frame)
     local glowDef = HRF.GetSectionGlow("defensive")
     local showCC = HRF.GetSectionShow("cc")
     local glowCC = HRF.GetSectionGlow("cc")
+    local showPureCC = HRF.GetSectionShow("pureCC")
+    local glowPureCC = HRF.GetSectionGlow("pureCC")
     local showDispel = HRF.GetSectionShow("dispel")
     local glowDispel = HRF.GetSectionGlow("dispel")
 
     if showHighlight then collectHighlights(unit) else for i = #highlights, 1, -1 do highlights[i] = nil end end
-    if showCC then collectCC(unit) else cc.spellId = nil end
+    -- Always run the dispellable-CC pass when any bottom-left slot is visible so pureCC
+    -- and dispel can dedupe against it, then suppress the slot if the user disabled it.
+    if showCC or showPureCC or showDispel then
+        collectCC(unit)
+    else
+        cc.spellId = nil
+        for k in pairs(dispellableCCInstances) do dispellableCCInstances[k] = nil end
+    end
+    if showPureCC then collectPureCC(unit) else pureCC.spellId = nil end
     if showDispel then collectDispel(unit) else dispel.spellId = nil end
     if showDef then collectDefensive(unit) else defensive.spellId = nil end
 
@@ -470,15 +564,19 @@ local function updateFrame(frame)
         end
     end
 
-    -- CC outranks generic dispellable debuffs; they share the bottom-left slot.
-    if cc.spellId then
+    if showCC and cc.spellId then
         showSlot(ind.ccIcon, ind.ccGlow, cc.spellId, cc.duration, cc.expires, glowCC)
-        hideSlot(ind.dispelIcon, ind.dispelGlow)
-    elseif dispel.spellId then
-        hideSlot(ind.ccIcon, ind.ccGlow)
-        showSlot(ind.dispelIcon, ind.dispelGlow, dispel.spellId, dispel.duration, dispel.expires, glowDispel)
     else
         hideSlot(ind.ccIcon, ind.ccGlow)
+    end
+    if showPureCC and pureCC.spellId then
+        showSlot(ind.pureCCIcon, ind.pureCCGlow, pureCC.spellId, pureCC.duration, pureCC.expires, glowPureCC)
+    else
+        hideSlot(ind.pureCCIcon, ind.pureCCGlow)
+    end
+    if showDispel and dispel.spellId then
+        showSlot(ind.dispelIcon, ind.dispelGlow, dispel.spellId, dispel.duration, dispel.expires, glowDispel)
+    else
         hideSlot(ind.dispelIcon, ind.dispelGlow)
     end
 
@@ -487,6 +585,8 @@ local function updateFrame(frame)
     else
         hideSlot(ind.defensiveIcon, ind.defensiveGlow)
     end
+
+    layoutBottomLeftGrid(frame)
 end
 
 local function refreshFrames()
@@ -559,7 +659,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
         print(prefix .. " enabled: adds three icon overlays to your raid frames:")
         print("  |cffffd100Top-right|r: your healer buffs on the target (configurable per spec)")
         print("  |cffffd100Top-left|r: the target's active defensive cooldown")
-        print("  |cffffd100Bottom-left|r: dispellable CC; otherwise any dispellable debuff")
+        print("  |cffffd100Bottom-left|r: dispellable CC, non-dispellable CC, and dispellable debuffs (grows left to right)")
         print("Type |cff33ff99/hrf|r to configure or disable any of these.")
     end
     refreshFrames()
