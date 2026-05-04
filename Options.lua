@@ -1,4 +1,4 @@
-local HRF = HealerRaidFrames
+local HRF = CleanRaidFrames
 
 local ROW_HEIGHT = 48
 local SETTINGS_ROW_HEIGHT = 40
@@ -600,7 +600,7 @@ HRF._optionsRefresh = refresh
 
 local function build()
     panel = CreateFrame("Frame")
-    panel.name = "Healer Raid Frames"
+    panel.name = "Clean Raid Frames"
 
     scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", SIDE_PAD, -SIDE_PAD)
@@ -701,7 +701,7 @@ local function build()
 end
 
 local function onEvent(self, event, arg1)
-    if event == "ADDON_LOADED" and arg1 == "HealerRaidFrames" then
+    if event == "ADDON_LOADED" and arg1 == "CleanRaidFrames" then
         if HRF.EnsureInitialized then HRF.EnsureInitialized() end
         build()
         self:UnregisterEvent("ADDON_LOADED")
@@ -717,11 +717,4 @@ if HRF.Subscribe then
         if suppressRefresh then return end
         if panel and panel:IsShown() and not dragState.active then refresh() end
     end)
-end
-
-SLASH_HRFOPTIONS1 = "/hrf"
-SlashCmdList["HRFOPTIONS"] = function()
-    if HRF.settingsCategoryID and Settings and Settings.OpenToCategory then
-        Settings.OpenToCategory(HRF.settingsCategoryID)
-    end
 end

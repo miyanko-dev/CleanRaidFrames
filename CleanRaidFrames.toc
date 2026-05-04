@@ -1,13 +1,12 @@
 ## Interface: 120005
-## Title: Healer Raid Frames
+## Title: Clean Raid Frames
 ## Category: UnitFrames
 ## Notes: Configurable icon overlays for healers: per-spec buffs (top-right), defensives (top-left), dispellable CC and debuffs (bottom-left).
 ## Author: MIYANKO
 ## Version: 3.0.0
 ## IconTexture: 133004
-## SavedVariables: HealerRaidFramesDB
+## SavedVariables: CleanRaidFramesDB
 
 Config.lua
 Auras.lua
 Options.lua
-Texture.lua

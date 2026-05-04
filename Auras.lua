@@ -1,4 +1,4 @@
-local HRF = HealerRaidFrames
+local HRF = CleanRaidFrames
 
 local HIGHLIGHT_SLOTS = HRF.MAX_HIGHLIGHT_SLOTS or 4
 local FRAME_INSET = 2
@@ -512,7 +512,7 @@ eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" then
-        if arg1 == "HealerRaidFrames" then HRF.EnsureInitialized() end
+        if arg1 == "CleanRaidFrames" then HRF.EnsureInitialized() end
         return
     end
     if event == "UNIT_AURA" then
@@ -525,8 +525,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "PLAYER_LOGIN" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
         refreshSpec()
     end
-    if event == "PLAYER_LOGIN" and HealerRaidFramesDB and not HealerRaidFramesDB.introShown then
-        HealerRaidFramesDB.introShown = true
+    if event == "PLAYER_LOGIN" and CleanRaidFramesDB and not CleanRaidFramesDB.introShown then
+        CleanRaidFramesDB.introShown = true
         local prefix = "|cff33ff99[Healer Raid Frames]|r"
         print(prefix .. " enabled: adds three icon overlays to your raid frames:")
         print("  |cffffd100Top-right|r: your healer buffs on the target (configurable per spec)")
@@ -543,7 +543,7 @@ end
 
 function HRF.ToggleTestMode()
     testMode = not testMode
-    print("|cff33ff99HealerRaidFrames|r: test mode " .. (testMode and "ON" or "OFF"))
+    print("|cff33ff99CleanRaidFrames|r: test mode " .. (testMode and "ON" or "OFF"))
     refreshFrames()
     return testMode
 end

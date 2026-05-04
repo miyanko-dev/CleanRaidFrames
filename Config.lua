@@ -1,5 +1,5 @@
-HealerRaidFrames = HealerRaidFrames or {}
-local HRF = HealerRaidFrames
+CleanRaidFrames = CleanRaidFrames or {}
+local HRF = CleanRaidFrames
 
 HRF.MAX_HIGHLIGHT_SLOTS = 4
 
@@ -123,7 +123,7 @@ end
 
 local function getSpecDB(specId)
     if not specId or not DEFAULTS[specId] then return nil end
-    local db = HealerRaidFramesDB
+    local db = CleanRaidFramesDB
     if not db then return nil end
     db.specs = db.specs or {}
     local spec = db.specs[specId]
@@ -181,8 +181,8 @@ local function ensureSection(db, key)
 end
 
 function HRF.EnsureInitialized()
-    HealerRaidFramesDB = HealerRaidFramesDB or {}
-    local db = HealerRaidFramesDB
+    CleanRaidFramesDB = CleanRaidFramesDB or {}
+    local db = CleanRaidFramesDB
     db.specs = db.specs or {}
     if type(db.highlightColor) ~= "table" or #db.highlightColor < 3 then
         db.highlightColor = copyColor(GLOBAL_DEFAULTS.highlightColor)
@@ -199,13 +199,13 @@ end
 
 local function getSectionDB(key)
     HRF.EnsureInitialized()
-    return HealerRaidFramesDB[key]
+    return CleanRaidFramesDB[key]
 end
 
 function HRF.GetSectionShow(key)
     if key == "highlight" then
         HRF.EnsureInitialized()
-        return HealerRaidFramesDB.highlightEnabled == true
+        return CleanRaidFramesDB.highlightEnabled == true
     end
     local s = getSectionDB(key)
     return s ~= nil and s.show == true
@@ -219,7 +219,7 @@ end
 function HRF.GetSectionColor(key)
     if key == "highlight" then
         HRF.EnsureInitialized()
-        local c = HealerRaidFramesDB.highlightColor
+        local c = CleanRaidFramesDB.highlightColor
         return c[1], c[2], c[3]
     end
     local s = getSectionDB(key)
@@ -230,7 +230,7 @@ end
 function HRF.SetSectionShow(key, value)
     if key == "highlight" then
         HRF.EnsureInitialized()
-        HealerRaidFramesDB.highlightEnabled = value and true or false
+        CleanRaidFramesDB.highlightEnabled = value and true or false
         notify()
         return
     end
@@ -251,7 +251,7 @@ function HRF.ResetSection(key)
     HRF.EnsureInitialized()
     local src = GLOBAL_DEFAULTS[key]
     if not src then return end
-    HealerRaidFramesDB[key] = {
+    CleanRaidFramesDB[key] = {
         show = src.show,
         glow = src.glow,
         color = copyColor(src.color),
@@ -262,11 +262,11 @@ end
 
 function HRF.ResetHighlightDefaults(specId)
     HRF.EnsureInitialized()
-    HealerRaidFramesDB.highlightEnabled = GLOBAL_DEFAULTS.highlightEnabled
-    HealerRaidFramesDB.highlightColor = copyColor(GLOBAL_DEFAULTS.highlightColor)
-    HealerRaidFramesDB.highlightScale = GLOBAL_DEFAULTS.highlightScale
+    CleanRaidFramesDB.highlightEnabled = GLOBAL_DEFAULTS.highlightEnabled
+    CleanRaidFramesDB.highlightColor = copyColor(GLOBAL_DEFAULTS.highlightColor)
+    CleanRaidFramesDB.highlightScale = GLOBAL_DEFAULTS.highlightScale
     if specId and DEFAULTS[specId] then
-        local db = HealerRaidFramesDB
+        local db = CleanRaidFramesDB
         db.specs = db.specs or {}
         db.specs[specId] = cloneDefaults(specId)
     end
@@ -275,7 +275,7 @@ end
 
 function HRF.ResetAllDefaults()
     HRF.EnsureInitialized()
-    local db = HealerRaidFramesDB
+    local db = CleanRaidFramesDB
     db.highlightEnabled = GLOBAL_DEFAULTS.highlightEnabled
     db.highlightColor = copyColor(GLOBAL_DEFAULTS.highlightColor)
     db.highlightScale = GLOBAL_DEFAULTS.highlightScale
@@ -298,9 +298,9 @@ end
 function HRF.GetSectionScale(key)
     HRF.EnsureInitialized()
     if key == "highlight" then
-        return clampScale(HealerRaidFramesDB.highlightScale)
+        return clampScale(CleanRaidFramesDB.highlightScale)
     end
-    local s = HealerRaidFramesDB[key]
+    local s = CleanRaidFramesDB[key]
     return s and clampScale(s.scale) or DEFAULT_SCALE
 end
 
@@ -308,9 +308,9 @@ function HRF.SetSectionScale(key, value)
     HRF.EnsureInitialized()
     local v = clampScale(value)
     if key == "highlight" then
-        HealerRaidFramesDB.highlightScale = v
+        CleanRaidFramesDB.highlightScale = v
     else
-        local s = HealerRaidFramesDB[key]
+        local s = CleanRaidFramesDB[key]
         if not s then return end
         s.scale = v
     end
@@ -320,7 +320,7 @@ end
 function HRF.SetSectionColor(key, r, g, b)
     HRF.EnsureInitialized()
     if key == "highlight" then
-        HealerRaidFramesDB.highlightColor = { r, g, b }
+        CleanRaidFramesDB.highlightColor = { r, g, b }
     else
         local s = getSectionDB(key)
         if not s then return end

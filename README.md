@@ -1,4 +1,4 @@
-# Healer Raid Frames
+# Clean Raid Frames
 
 Adds three icon overlays to Blizzard's raid and party frames so healers can see what matters at a glance. Active only in healer specs.
 
@@ -11,7 +11,7 @@ Adds three icon overlays to Blizzard's raid and party frames so healers can see 
 
 ## Configuration
 
-Type `/hrf` to open the settings panel. Each section provides:
+Open the settings panel via the WoW add-ons settings menu. Each section provides:
 
 - Enable / Glow checkboxes
 - Custom Color toggle (off = native gold proc glow, on = full color takeover via desaturation)
