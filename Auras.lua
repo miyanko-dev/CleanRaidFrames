@@ -55,16 +55,13 @@ local function createIcon(parent)
     return icon
 end
 
-local function getTexture(spellId) return C_Spell.GetSpellTexture(spellId) end
-
-local function showSlot(icon, glow, spellId, useGlow)
-    local ok, tex = pcall(getTexture, spellId)
-    if not ok or not tex then
+local function showSlot(icon, glow, texture, useGlow)
+    if not texture then
         icon:Hide()
         hideGlow(glow)
         return
     end
-    icon.texture:SetTexture(tex)
+    icon.texture:SetTexture(texture)
     icon:Show()
     if useGlow == false then
         hideGlow(glow)
@@ -193,19 +190,10 @@ local function layoutBottomLeftGrid(frame)
     end
 end
 
--- Reusable tables to avoid per-frame allocation in the hot path.
 local presentAuras = {}
 local dispellableCCInstances = {}
 
--- In PvP/combat, aura fields like spellId become "secret" values. Reading them
--- doesn't error, but USING them (as table keys, in comparisons, in conditionals)
--- does. We force table-key usage inside pcall for highlights (where we need to
--- match against the user's config). For CC/debuffs/defensives, we carry the
--- spellId opaquely and let showSlot's pcall(C_Spell.GetSpellTexture) handle it.
-local function matchHighlight(aura, show, present)
-    local id = aura.spellId
-    if show[id] then present[id] = true end
-end
+local noErr = function() end
 
 local function collectHighlights(unit, spec, out)
     if not spec then return 0 end
@@ -213,13 +201,17 @@ local function collectHighlights(unit, spec, out)
 
     wipe(presentAuras)
     AuraUtil.ForEachAura(unit, "HELPFUL|PLAYER", nil, function(aura)
-        if not aura then return end
-        pcall(matchHighlight, aura, show, presentAuras)
+        xpcall(function()
+            local id = aura.spellId
+            if id and show[id] then
+                presentAuras[id] = aura.icon
+            end
+        end, noErr)
     end, true)
 
     local n = 0
     for _, spellId in ipairs(spec.order) do
-        if show[spellId] and presentAuras[spellId] then
+        if presentAuras[spellId] then
             n = n + 1
             out[n] = spellId
             if n >= HIGHLIGHT_SLOTS then break end
@@ -229,58 +221,60 @@ local function collectHighlights(unit, spec, out)
 end
 
 local function collectCC(unit)
-    local spellId
-    local found = false
+    local icon
     wipe(dispellableCCInstances)
     AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
-        if not aura then return end
-        if aura.auraInstanceID then
-            dispellableCCInstances[aura.auraInstanceID] = true
-        end
-        if not found then
-            spellId = aura.spellId
-            found = true
-        end
+        xpcall(function()
+            local instID = aura.auraInstanceID
+            if instID then
+                dispellableCCInstances[instID] = true
+                if not icon then
+                    icon = aura.icon
+                end
+            end
+        end, noErr)
     end, true)
-    return found, spellId, dispellableCCInstances
+    return icon, dispellableCCInstances
 end
 
 local function collectPureCC(unit, dispellable)
-    local spellId
-    local found = false
+    local icon
     AuraUtil.ForEachAura(unit, "HARMFUL|CROWD_CONTROL", nil, function(aura)
-        if not aura then return end
-        if aura.auraInstanceID and dispellable[aura.auraInstanceID] then return end
-        spellId = aura.spellId
-        found = true
-        return true
+        if icon then return true end
+        xpcall(function()
+            local instID = aura.auraInstanceID
+            if instID and dispellable[instID] then return end
+            icon = aura.icon
+        end, noErr)
+        if icon then return true end
     end, true)
-    return found, spellId
+    return icon
 end
 
 local function collectDispel(unit, dispellable)
-    local spellId
-    local found = false
+    local icon
     AuraUtil.ForEachAura(unit, "HARMFUL|RAID_PLAYER_DISPELLABLE", nil, function(aura)
-        if not aura then return end
-        if aura.auraInstanceID and dispellable[aura.auraInstanceID] then return end
-        spellId = aura.spellId
-        found = true
-        return true
+        if icon then return true end
+        xpcall(function()
+            local instID = aura.auraInstanceID
+            if instID and dispellable[instID] then return end
+            icon = aura.icon
+        end, noErr)
+        if icon then return true end
     end, true)
-    return found, spellId
+    return icon
 end
 
 local function collectDefensive(unit)
-    local spellId
-    local found = false
+    local icon
     AuraUtil.ForEachAura(unit, "HELPFUL|BIG_DEFENSIVE", nil, function(aura)
-        if not aura then return end
-        spellId = aura.spellId
-        found = true
-        return true
+        if icon then return true end
+        xpcall(function()
+            icon = aura.icon
+        end, noErr)
+        if icon then return true end
     end, true)
-    return found, spellId
+    return icon
 end
 
 local function hideAll(ind)
@@ -289,6 +283,11 @@ local function hideAll(ind)
     hideSlot(ind.pureCCIcon, ind.pureCCGlow)
     hideSlot(ind.dispelIcon, ind.dispelGlow)
     hideSlot(ind.defensiveIcon, ind.defensiveGlow)
+end
+
+local function textureForSpell(spellId)
+    local ok, tex = pcall(C_Spell.GetSpellTexture, spellId)
+    return ok and tex or nil
 end
 
 local TEST_FALLBACK_HIGHLIGHTS = { 33763, 774, 155777, 8936, 48438 }
@@ -306,47 +305,53 @@ local function applyTest(frame)
     if showHighlight and activeSpecConfig then
         for _, spellId in ipairs(activeSpecConfig.order) do
             if activeSpecConfig.show[spellId] then
-                entries[#entries + 1] = { spellId = spellId, useGlow = activeSpecConfig.glow[spellId] == true }
+                entries[#entries + 1] = { icon = textureForSpell(spellId), useGlow = activeSpecConfig.glow[spellId] == true }
                 if #entries >= HIGHLIGHT_SLOTS then break end
             end
         end
     end
     if showHighlight and #entries == 0 then
         for i = 1, math.min(HIGHLIGHT_SLOTS, #TEST_FALLBACK_HIGHLIGHTS) do
-            entries[i] = { spellId = TEST_FALLBACK_HIGHLIGHTS[i], useGlow = true }
+            entries[i] = { icon = textureForSpell(TEST_FALLBACK_HIGHLIGHTS[i]), useGlow = true }
         end
     end
 
     for i, slot in ipairs(ind.highlights) do
         local entry = entries[i]
-        if entry then
-            showSlot(slot.icon, slot.glow, entry.spellId, entry.useGlow)
+        if entry and entry.icon then
+            showSlot(slot.icon, slot.glow, entry.icon, entry.useGlow)
         else
             hideSlot(slot.icon, slot.glow)
         end
     end
 
     if HRF.GetSectionShow("cc") then
-        showSlot(ind.ccIcon, ind.ccGlow, TEST_CC, HRF.GetSectionGlow("cc"))
+        showSlot(ind.ccIcon, ind.ccGlow, textureForSpell(TEST_CC), HRF.GetSectionGlow("cc"))
     else
         hideSlot(ind.ccIcon, ind.ccGlow)
     end
     if HRF.GetSectionShow("pureCC") then
-        showSlot(ind.pureCCIcon, ind.pureCCGlow, TEST_PURE_CC, HRF.GetSectionGlow("pureCC"))
+        showSlot(ind.pureCCIcon, ind.pureCCGlow, textureForSpell(TEST_PURE_CC), HRF.GetSectionGlow("pureCC"))
     else
         hideSlot(ind.pureCCIcon, ind.pureCCGlow)
     end
     if HRF.GetSectionShow("dispel") then
-        showSlot(ind.dispelIcon, ind.dispelGlow, TEST_DISPEL, HRF.GetSectionGlow("dispel"))
+        showSlot(ind.dispelIcon, ind.dispelGlow, textureForSpell(TEST_DISPEL), HRF.GetSectionGlow("dispel"))
     else
         hideSlot(ind.dispelIcon, ind.dispelGlow)
     end
     if HRF.GetSectionShow("defensive") then
-        showSlot(ind.defensiveIcon, ind.defensiveGlow, TEST_DEFENSIVE, HRF.GetSectionGlow("defensive"))
+        showSlot(ind.defensiveIcon, ind.defensiveGlow, textureForSpell(TEST_DEFENSIVE), HRF.GetSectionGlow("defensive"))
     else
         hideSlot(ind.defensiveIcon, ind.defensiveGlow)
     end
     layoutBottomLeftGrid(frame)
+end
+
+local function refreshSpec()
+    local id = HRF.GetActiveSpec()
+    isHealer = HRF.IsTrackedSpec(id)
+    activeSpecConfig = isHealer and HRF.GetSpecConfig(id) or nil
 end
 
 local function updateFrame(frame)
@@ -355,7 +360,12 @@ local function updateFrame(frame)
     if testMode then applyTest(frame); return end
     if not isHealer then hideAll(ind); return end
     local unit = frame.displayedUnit or frame.unit
-    if not unit or not UnitExists(unit) then hideAll(ind); return end
+    if not unit or not UnitExists(unit) or UnitIsDeadOrGhost(unit) then hideAll(ind); return end
+
+    if not activeSpecConfig then
+        refreshSpec()
+        if not activeSpecConfig then hideAll(ind); return end
+    end
 
     local showHighlight = HRF.GetSectionShow("highlight")
     local showCC = HRF.GetSectionShow("cc")
@@ -363,59 +373,56 @@ local function updateFrame(frame)
     local showDispel = HRF.GetSectionShow("dispel")
     local showDef = HRF.GetSectionShow("defensive")
 
-    -- Highlights: collectHighlights writes spellIds into highlightOut, returns count.
     local highlightOut = ind._highlightOut
     if not highlightOut then
         highlightOut = {}
         ind._highlightOut = highlightOut
     end
+    wipe(highlightOut)
+
     local highlightCount = 0
     if showHighlight then
         highlightCount = collectHighlights(unit, activeSpecConfig, highlightOut)
     end
 
-    -- Bottom-left: CC, pureCC, dispel share a dispellable-CC instance set for dedup.
-    local ccFound, ccSpell, dispellable
+    local ccIcon, dispellable
     if showCC or showPureCC or showDispel then
-        ccFound, ccSpell, dispellable = collectCC(unit)
+        ccIcon, dispellable = collectCC(unit)
     end
-    local pureCCFound, pureCCSpell
-    if showPureCC then pureCCFound, pureCCSpell = collectPureCC(unit, dispellable) end
-    local dispelFound, dispelSpell
-    if showDispel then dispelFound, dispelSpell = collectDispel(unit, dispellable) end
+    local pureCCIcon
+    if showPureCC then pureCCIcon = collectPureCC(unit, dispellable) end
+    local dispelIcon
+    if showDispel then dispelIcon = collectDispel(unit, dispellable) end
+    local defIcon
+    if showDef then defIcon = collectDefensive(unit) end
 
-    -- Defensive
-    local defFound, defensiveSpell
-    if showDef then defFound, defensiveSpell = collectDefensive(unit) end
-
-    -- Apply highlights
-    local glow = activeSpecConfig and activeSpecConfig.glow
+    local glow = activeSpecConfig.glow
     for i, slot in ipairs(ind.highlights) do
         local spellId = highlightOut[i]
         if i <= highlightCount and spellId then
-            showSlot(slot.icon, slot.glow, spellId, glow and glow[spellId] == true)
+            showSlot(slot.icon, slot.glow, presentAuras[spellId], glow[spellId] == true)
         else
             hideSlot(slot.icon, slot.glow)
         end
     end
 
-    if showCC and ccFound then
-        showSlot(ind.ccIcon, ind.ccGlow, ccSpell, HRF.GetSectionGlow("cc"))
+    if showCC and ccIcon then
+        showSlot(ind.ccIcon, ind.ccGlow, ccIcon, HRF.GetSectionGlow("cc"))
     else
         hideSlot(ind.ccIcon, ind.ccGlow)
     end
-    if pureCCFound then
-        showSlot(ind.pureCCIcon, ind.pureCCGlow, pureCCSpell, HRF.GetSectionGlow("pureCC"))
+    if showPureCC and pureCCIcon then
+        showSlot(ind.pureCCIcon, ind.pureCCGlow, pureCCIcon, HRF.GetSectionGlow("pureCC"))
     else
         hideSlot(ind.pureCCIcon, ind.pureCCGlow)
     end
-    if dispelFound then
-        showSlot(ind.dispelIcon, ind.dispelGlow, dispelSpell, HRF.GetSectionGlow("dispel"))
+    if showDispel and dispelIcon then
+        showSlot(ind.dispelIcon, ind.dispelGlow, dispelIcon, HRF.GetSectionGlow("dispel"))
     else
         hideSlot(ind.dispelIcon, ind.dispelGlow)
     end
-    if defFound then
-        showSlot(ind.defensiveIcon, ind.defensiveGlow, defensiveSpell, HRF.GetSectionGlow("defensive"))
+    if showDef and defIcon then
+        showSlot(ind.defensiveIcon, ind.defensiveGlow, defIcon, HRF.GetSectionGlow("defensive"))
     else
         hideSlot(ind.defensiveIcon, ind.defensiveGlow)
     end
@@ -442,12 +449,6 @@ local function refreshFrames()
             updateFrame(frame)
         end
     end
-end
-
-local function refreshSpec()
-    local id = HRF.GetActiveSpec()
-    isHealer = HRF.IsTrackedSpec(id)
-    activeSpecConfig = isHealer and HRF.GetSpecConfig(id) or nil
 end
 
 HRF.Subscribe(function()
