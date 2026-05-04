@@ -70,18 +70,18 @@ local DEFAULTS = {
     },
 }
 
-local DEFAULT_SCALE = 0.4 -- 40% of raid frame height
-local MIN_SCALE, MAX_SCALE = 0.05, 1.0
+local DEFAULT_SCALE = 0.35
+local MIN_SCALE, MAX_SCALE = 0.10, 1.0
 
 local GLOBAL_DEFAULTS = {
     highlightEnabled = true,
-    highlightColor = { 1.0, 1.0, 1.0 }, -- native (untinted proc glow)
+    highlightColor = { 1.0, 1.0, 1.0 },
     highlightScale = DEFAULT_SCALE,
     highlightGlowCustom = false,
-    defensive = { show = true, glow = true, glowCustom = true,  color = { 0.1, 1.0, 0.1 }, scale = DEFAULT_SCALE },
-    cc        = { show = true, glow = true, glowCustom = true,  color = { 1.0, 0.1, 0.1 }, scale = DEFAULT_SCALE },
-    pureCC    = { show = true, glow = true, glowCustom = true,  color = { 1.0, 0.6, 0.0 }, scale = DEFAULT_SCALE },
-    dispel    = { show = true, glow = true, glowCustom = true,  color = { 0.4, 0.6, 1.0 }, scale = DEFAULT_SCALE },
+    defensive = { show = true, glow = true,  glowCustom = true,  color = { 0.1, 1.0, 0.1 }, scale = DEFAULT_SCALE },
+    cc        = { show = true, glow = true,  glowCustom = true,  color = { 1.0, 0.1, 0.1 }, scale = 0.50 },
+    pureCC    = { show = true, glow = false, glowCustom = false, color = { 1.0, 0.6, 0.0 }, scale = 0.50 },
+    dispel    = { show = true, glow = false, glowCustom = false, color = { 0.4, 0.6, 1.0 }, scale = DEFAULT_SCALE },
 }
 
 HRF.SCALE_MIN = MIN_SCALE
@@ -298,11 +298,31 @@ function HRF.ResetHighlightDefaults(specId)
     if specId and DEFAULTS[specId] then
         local db = HealerRaidFramesDB
         db.specs = db.specs or {}
-        local spec = db.specs[specId]
-        if spec then
-            for id in pairs(spec.show) do spec.show[id] = false end
-            for id in pairs(spec.glow) do spec.glow[id] = false end
-        end
+        db.specs[specId] = cloneDefaults(specId)
+    end
+    notify()
+end
+
+function HRF.ResetAllDefaults()
+    HRF.EnsureInitialized()
+    local db = HealerRaidFramesDB
+    db.highlightEnabled = GLOBAL_DEFAULTS.highlightEnabled
+    db.highlightGlowCustom = GLOBAL_DEFAULTS.highlightGlowCustom
+    db.highlightColor = copyColor(GLOBAL_DEFAULTS.highlightColor)
+    db.highlightScale = GLOBAL_DEFAULTS.highlightScale
+    local specId = HRF.GetActiveSpec()
+    if specId and DEFAULTS[specId] then
+        db.specs[specId] = cloneDefaults(specId)
+    end
+    for _, key in ipairs({ "defensive", "cc", "pureCC", "dispel" }) do
+        local src = GLOBAL_DEFAULTS[key]
+        db[key] = {
+            show = src.show,
+            glow = src.glow,
+            glowCustom = src.glowCustom,
+            color = copyColor(src.color),
+            scale = src.scale,
+        }
     end
     notify()
 end

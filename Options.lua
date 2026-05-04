@@ -14,7 +14,7 @@ local HIGHLIGHT_R, HIGHLIGHT_G, HIGHLIGHT_B = 1.0, 0.82, 0.0
 local GHOST_ALPHA = 0.35
 
 local panel, scroll, content, scrollBar
-local header, hint, testButton
+local header, hint, testButton, resetAllButton
 local buffsSection, defensiveSection, ccSection, pureCCSection, dispelSection
 local buffsHint, buffListSubtitle
 local buffsDisabledNotice
@@ -323,38 +323,38 @@ local function clearRows()
     for i = #activeRows, 1, -1 do activeRows[i] = nil end
 end
 
-local function addSizeField(parent, sectionKey, anchor)
-    local sizeLabel = makeLabel(parent, "Size %:")
+local SLIDER_MIN = 10
+local SLIDER_MAX = 100
+local SLIDER_STEP = 5
+local SLIDER_STEPS = (SLIDER_MAX - SLIDER_MIN) / SLIDER_STEP
+
+local function addSizeSlider(parent, sectionKey, anchor)
+    local sizeLabel = makeLabel(parent, "Size:")
     sizeLabel:SetPoint("LEFT", anchor, "RIGHT", 14, 0)
 
-    local sizeEdit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    sizeEdit:SetSize(40, 20)
-    sizeEdit:SetPoint("LEFT", sizeLabel, "RIGHT", 6, 0)
-    sizeEdit:SetAutoFocus(false)
-    sizeEdit:SetNumeric(true)
-    sizeEdit:SetMaxLetters(3)
+    local slider = CreateFrame("Frame", nil, parent, "MinimalSliderWithSteppersTemplate")
+    slider:SetSize(130, 32)
+    slider:SetPoint("LEFT", sizeLabel, "RIGHT", 6, 0)
 
-    local function commit()
-        local raw = tonumber(sizeEdit:GetText()) or 0
-        local minP = math.floor(HRF.SCALE_MIN * 100 + 0.5)
-        local maxP = math.floor(HRF.SCALE_MAX * 100 + 0.5)
-        local percent = math.max(minP, math.min(maxP, math.floor(raw + 0.5)))
-        HRF.SetSectionScale(sectionKey, percent / 100)
-        sizeEdit:SetText(tostring(percent))
-        sizeEdit:ClearFocus()
-    end
-    sizeEdit:SetScript("OnEnterPressed", commit)
-    sizeEdit:SetScript("OnEscapePressed", function(self)
-        self:SetText(tostring(math.floor(HRF.GetSectionScale(sectionKey) * 100 + 0.5)))
-        self:ClearFocus()
+    local currentPercent = math.floor(HRF.GetSectionScale(sectionKey) * 100 + 0.5)
+    currentPercent = math.max(SLIDER_MIN, math.min(SLIDER_MAX, currentPercent))
+
+    local formatters = {
+        [MinimalSliderWithSteppersMixin.Label.Right] = function(value)
+            return string.format("%d%%", value)
+        end,
+    }
+    slider:Init(currentPercent, SLIDER_MIN, SLIDER_MAX, SLIDER_STEPS, formatters)
+
+    slider:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged, function(_, value)
+        HRF.SetSectionScale(sectionKey, value / 100)
     end)
-    sizeEdit:SetScript("OnEditFocusLost", commit)
 
-    return sizeLabel, sizeEdit
+    return sizeLabel, slider
 end
 
 -- Builds: title, "General Settings" subtitle, and a settings-row container with the
--- Enable checkbox (+ optional Glow checkbox), color swatch, size field, reset button.
+-- Enable checkbox (+ optional Glow checkbox), color swatch, and size field.
 local function buildSectionShell(parent, title, sectionKey, opts)
     opts = opts or {}
     local hasGlow = opts.hasGlow ~= false
@@ -432,12 +432,7 @@ local function buildSectionShell(parent, title, sectionKey, opts)
         updateSwatchEnabled(showOn and glowOn and checked)
     end)
 
-    local sizeLabel, sizeEdit = addSizeField(row, sectionKey, swatch)
-
-    local resetButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-    resetButton:SetSize(130, 22)
-    resetButton:SetText("Reset to defaults")
-    resetButton:SetPoint("RIGHT", row, "RIGHT", -12, 0)
+    local sizeLabel, sizeSlider = addSizeSlider(row, sectionKey, swatch)
 
     local function cascadeCustom()
         local showOn = showCheck:GetChecked() == true
@@ -472,8 +467,7 @@ local function buildSectionShell(parent, title, sectionKey, opts)
         customCheck = customCheck,
         swatch = swatch,
         updateSwatchEnabled = updateSwatchEnabled,
-        sizeEdit = sizeEdit,
-        resetButton = resetButton,
+        sizeSlider = sizeSlider,
     }
 end
 
@@ -509,8 +503,10 @@ local function refreshSection(section)
 
     local r, g, b = HRF.GetSectionColor(key)
     section.swatch:SetColor(r, g, b)
-    if section.sizeEdit and not section.sizeEdit:HasFocus() then
-        section.sizeEdit:SetText(tostring(math.floor(HRF.GetSectionScale(key) * 100 + 0.5)))
+    if section.sizeSlider then
+        local percent = math.floor(HRF.GetSectionScale(key) * 100 + 0.5)
+        percent = math.max(SLIDER_MIN, math.min(SLIDER_MAX, percent))
+        section.sizeSlider:SetValue(percent)
     end
 end
 
@@ -564,7 +560,6 @@ local function refresh()
         buffsHint:SetText("Display buffs on the raid frame in the top right corner. Glow adds a proc glow. "
             .. "Drag rows to change order. Top to bottom maps to right to left. "
             .. "Only the first " .. tostring(HRF.MAX_HIGHLIGHT_SLOTS) .. " buffs are shown.")
-        buffsSection.resetButton:Enable()
 
         buffListSubtitle:ClearAllPoints()
         buffListSubtitle:SetPoint("TOPLEFT", buffsSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
@@ -676,6 +671,16 @@ local function build()
     end)
     testButton:SetText((HRF.IsTestModeOn and HRF.IsTestModeOn()) and "Test mode: ON" or "Test mode: OFF")
 
+    resetAllButton = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    resetAllButton:SetSize(140, 22)
+    resetAllButton:SetText("Reset to Defaults")
+    resetAllButton:SetPoint("TOP", testButton, "BOTTOM", 0, -6)
+    resetAllButton:SetPoint("RIGHT", content, "RIGHT", -CONTENT_PAD, 0)
+    resetAllButton:SetScript("OnClick", function()
+        HRF.ResetAllDefaults()
+        refresh()
+    end)
+
     hint = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -8)
     hint:SetPoint("RIGHT", testButton, "LEFT", -8, 0)
@@ -685,11 +690,6 @@ local function build()
 
     buffsSection = buildSectionShell(content, "Healer Buff Display (Top Right Corner)", "highlight", { hasGlow = false })
     buffsSection.title:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -SECTION_GAP)
-    buffsSection.resetButton:SetScript("OnClick", function()
-        local specId = HRF.GetActiveSpec and HRF.GetActiveSpec()
-        HRF.ResetHighlightDefaults(specId)
-        refresh()
-    end)
 
     -- Shown in place of the buff controls when the player is not in a healing spec.
     buffsDisabledNotice = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -708,34 +708,18 @@ local function build()
     buffsHint:SetTextColor(1, 0.82, 0)
 
     defensiveSection = buildSectionShell(content, "Defensive Buff Icons (Top Left Corner)", "defensive")
-    defensiveSection.resetButton:SetScript("OnClick", function()
-        HRF.ResetSection("defensive")
-        refresh()
-    end)
 
     ccSection = buildSectionShell(content, "Dispellable CC Debuff Icon (Bottom Left Corner, Slot 1)", "cc")
     ccSection.title:ClearAllPoints()
     ccSection.title:SetPoint("TOPLEFT", defensiveSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
-    ccSection.resetButton:SetScript("OnClick", function()
-        HRF.ResetSection("cc")
-        refresh()
-    end)
 
     pureCCSection = buildSectionShell(content, "Non-Dispellable CC Debuff Icon (Bottom Left Corner, Slot 2)", "pureCC")
     pureCCSection.title:ClearAllPoints()
     pureCCSection.title:SetPoint("TOPLEFT", ccSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
-    pureCCSection.resetButton:SetScript("OnClick", function()
-        HRF.ResetSection("pureCC")
-        refresh()
-    end)
 
     dispelSection = buildSectionShell(content, "Dispellable Debuff Icon (Bottom Left Corner, Slot 3)", "dispel")
     dispelSection.title:ClearAllPoints()
     dispelSection.title:SetPoint("TOPLEFT", pureCCSection.row, "BOTTOMLEFT", 0, -SECTION_GAP)
-    dispelSection.resetButton:SetScript("OnClick", function()
-        HRF.ResetSection("dispel")
-        refresh()
-    end)
 
     panel:SetScript("OnShow", refresh)
 
