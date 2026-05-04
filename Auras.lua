@@ -48,16 +48,36 @@ end
 
 local function createIcon(parent)
     local icon = CreateFrame("Frame", nil, parent)
-    icon.texture = icon:CreateTexture(nil, "OVERLAY", nil, 7)
+    icon.texture = icon:CreateTexture(nil, "OVERLAY", nil, 6)
     icon.texture:SetAllPoints(icon)
     icon.texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local border = icon:CreateTexture(nil, "OVERLAY", nil, 7)
+    border:SetTexture("Interface\\Buttons\\UI-Debuff-Overlays")
+    border:SetTexCoord(0.296875, 0.5703125, 0, 0.515625)
+    border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
+    border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
+    border:Hide()
+    icon.border = border
     icon:Hide()
     return icon
+end
+
+local function showBorder(icon)
+    if icon.border then
+        icon.border:Show()
+    end
+end
+
+local function hideBorder(icon)
+    if icon.border then
+        icon.border:Hide()
+    end
 end
 
 local function showSlot(icon, glow, texture, useGlow)
     if not texture then
         icon:Hide()
+        hideBorder(icon)
         hideGlow(glow)
         return
     end
@@ -65,13 +85,16 @@ local function showSlot(icon, glow, texture, useGlow)
     icon:Show()
     if useGlow == false then
         hideGlow(glow)
+        showBorder(icon)
     else
         showGlow(glow)
+        hideBorder(icon)
     end
 end
 
 local function hideSlot(icon, glow)
     icon:Hide()
+    hideBorder(icon)
     hideGlow(glow)
 end
 
@@ -110,15 +133,15 @@ end
 local SINGLE_GLOW_SECTIONS = { "defensive", "cc", "pureCC", "dispel" }
 
 local function applyColors(ind)
-    local hCustom = HRF.GetSectionGlowCustom("highlight")
     local hr, hg, hb = HRF.GetSectionColor("highlight")
     for _, slot in ipairs(ind.highlights) do
-        applyGlowColor(slot.glow, hr, hg, hb, hCustom)
+        applyGlowColor(slot.glow, hr, hg, hb, true)
+        slot.icon.border:SetVertexColor(hr, hg, hb)
     end
     for _, key in ipairs(SINGLE_GLOW_SECTIONS) do
-        local custom = HRF.GetSectionGlowCustom(key)
         local r, g, b = HRF.GetSectionColor(key)
-        applyGlowColor(ind[key .. "Glow"], r, g, b, custom)
+        applyGlowColor(ind[key .. "Glow"], r, g, b, true)
+        ind[key .. "Icon"].border:SetVertexColor(r, g, b)
     end
 end
 

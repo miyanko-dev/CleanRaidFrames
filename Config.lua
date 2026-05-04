@@ -75,13 +75,12 @@ local MIN_SCALE, MAX_SCALE = 0.10, 1.0
 
 local GLOBAL_DEFAULTS = {
     highlightEnabled = true,
-    highlightColor = { 1.0, 1.0, 1.0 },
+    highlightColor = { 1.0, 0.82, 0.0 },
     highlightScale = DEFAULT_SCALE,
-    highlightGlowCustom = false,
-    defensive = { show = true, glow = true,  glowCustom = true,  color = { 0.1, 1.0, 0.1 }, scale = DEFAULT_SCALE },
-    cc        = { show = true, glow = true,  glowCustom = true,  color = { 1.0, 0.1, 0.1 }, scale = 0.50 },
-    pureCC    = { show = true, glow = false, glowCustom = false, color = { 1.0, 0.6, 0.0 }, scale = 0.50 },
-    dispel    = { show = true, glow = false, glowCustom = false, color = { 0.4, 0.6, 1.0 }, scale = DEFAULT_SCALE },
+    defensive = { show = true, glow = true,  color = { 0.0, 0.6, 0.0 }, scale = DEFAULT_SCALE },
+    cc        = { show = true, glow = true,  color = { 0.2, 0.6, 1.0 }, scale = 0.50 },
+    pureCC    = { show = true, glow = false, color = { 1.0, 0.0, 0.0 }, scale = 0.50 },
+    dispel    = { show = true, glow = false, color = { 0.6, 0.0, 1.0 }, scale = DEFAULT_SCALE },
 }
 
 HRF.SCALE_MIN = MIN_SCALE
@@ -166,7 +165,6 @@ local function ensureSection(db, key)
         section = {
             show = src.show,
             glow = src.glow,
-            glowCustom = src.glowCustom,
             color = copyColor(src.color),
             scale = src.scale,
         }
@@ -175,7 +173,6 @@ local function ensureSection(db, key)
     end
     if section.show == nil then section.show = src.show end
     if section.glow == nil then section.glow = src.glow end
-    if section.glowCustom == nil then section.glowCustom = src.glowCustom end
     if type(section.color) ~= "table" or #section.color < 3 then
         section.color = copyColor(src.color)
     end
@@ -193,9 +190,6 @@ function HRF.EnsureInitialized()
     db.highlightScale = clampScale(db.highlightScale)
     if db.highlightEnabled == nil then
         db.highlightEnabled = GLOBAL_DEFAULTS.highlightEnabled
-    end
-    if db.highlightGlowCustom == nil then
-        db.highlightGlowCustom = GLOBAL_DEFAULTS.highlightGlowCustom
     end
     ensureSection(db, "defensive")
     ensureSection(db, "cc")
@@ -253,28 +247,6 @@ function HRF.SetSectionGlow(key, value)
     notify()
 end
 
-function HRF.GetSectionGlowCustom(key)
-    if key == "highlight" then
-        HRF.EnsureInitialized()
-        return HealerRaidFramesDB.highlightGlowCustom == true
-    end
-    local s = getSectionDB(key)
-    return s ~= nil and s.glowCustom == true
-end
-
-function HRF.SetSectionGlowCustom(key, value)
-    if key == "highlight" then
-        HRF.EnsureInitialized()
-        HealerRaidFramesDB.highlightGlowCustom = value and true or false
-        notify()
-        return
-    end
-    local s = getSectionDB(key)
-    if not s then return end
-    s.glowCustom = value and true or false
-    notify()
-end
-
 function HRF.ResetSection(key)
     HRF.EnsureInitialized()
     local src = GLOBAL_DEFAULTS[key]
@@ -282,7 +254,6 @@ function HRF.ResetSection(key)
     HealerRaidFramesDB[key] = {
         show = src.show,
         glow = src.glow,
-        glowCustom = src.glowCustom,
         color = copyColor(src.color),
         scale = src.scale,
     }
@@ -292,7 +263,6 @@ end
 function HRF.ResetHighlightDefaults(specId)
     HRF.EnsureInitialized()
     HealerRaidFramesDB.highlightEnabled = GLOBAL_DEFAULTS.highlightEnabled
-    HealerRaidFramesDB.highlightGlowCustom = GLOBAL_DEFAULTS.highlightGlowCustom
     HealerRaidFramesDB.highlightColor = copyColor(GLOBAL_DEFAULTS.highlightColor)
     HealerRaidFramesDB.highlightScale = GLOBAL_DEFAULTS.highlightScale
     if specId and DEFAULTS[specId] then
@@ -307,7 +277,6 @@ function HRF.ResetAllDefaults()
     HRF.EnsureInitialized()
     local db = HealerRaidFramesDB
     db.highlightEnabled = GLOBAL_DEFAULTS.highlightEnabled
-    db.highlightGlowCustom = GLOBAL_DEFAULTS.highlightGlowCustom
     db.highlightColor = copyColor(GLOBAL_DEFAULTS.highlightColor)
     db.highlightScale = GLOBAL_DEFAULTS.highlightScale
     local specId = HRF.GetActiveSpec()
@@ -319,7 +288,6 @@ function HRF.ResetAllDefaults()
         db[key] = {
             show = src.show,
             glow = src.glow,
-            glowCustom = src.glowCustom,
             color = copyColor(src.color),
             scale = src.scale,
         }

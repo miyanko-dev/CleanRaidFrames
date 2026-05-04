@@ -52,7 +52,7 @@ local function makeLabel(parent, text)
     return fs
 end
 
-local function updateGlowEnabled(glowCheck, showCheck, colorLabel)
+local function updateGlowEnabled(glowCheck, showCheck)
     local enabled = showCheck:GetChecked() == true
     if enabled then
         glowCheck:Enable()
@@ -60,10 +60,6 @@ local function updateGlowEnabled(glowCheck, showCheck, colorLabel)
         glowCheck:Disable()
     end
     setLabelEnabled(glowCheck.text, enabled)
-    if colorLabel then
-        local colorActive = enabled and glowCheck:GetChecked() == true
-        setLabelEnabled(colorLabel, colorActive)
-    end
 end
 
 local function createSwatch(parent)
@@ -287,7 +283,7 @@ local function acquireRow(parent)
     row.label:SetPoint("LEFT", row.iconFrame, "RIGHT", 8, 0)
     row.label:SetJustifyH("LEFT")
 
-    row.showLabel = makeLabel(row, "Show:")
+    row.showLabel = makeLabel(row, "Enable:")
 
     row.showCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
     row.showCheck:SetSize(22, 22)
@@ -354,7 +350,7 @@ local function addSizeSlider(parent, sectionKey, anchor)
 end
 
 -- Builds: title, "General Settings" subtitle, and a settings-row container with the
--- Enable checkbox (+ optional Glow checkbox), color swatch, and size field.
+-- Enable checkbox, Highlight Color label + swatch, optional Glow checkbox, and size field.
 local function buildSectionShell(parent, title, sectionKey, opts)
     opts = opts or {}
     local hasGlow = opts.hasGlow ~= false
@@ -380,29 +376,11 @@ local function buildSectionShell(parent, title, sectionKey, opts)
     showCheck.text = showLabel
     showCheck:SetPoint("LEFT", showLabel, "RIGHT", 4, 0)
 
-    local glowCheck, glowLabel
-    local anchorAfterChecks = showCheck
-    if hasGlow then
-        glowLabel = makeLabel(row, "Glow:")
-        glowLabel:SetPoint("LEFT", showCheck, "RIGHT", 16, 0)
-
-        glowCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-        glowCheck:SetSize(22, 22)
-        glowCheck.text = glowLabel
-        glowCheck:SetPoint("LEFT", glowLabel, "RIGHT", 4, 0)
-        anchorAfterChecks = glowCheck
-    end
-
-    local colorLabel = makeLabel(row, "Custom Color:")
-    colorLabel:SetPoint("LEFT", anchorAfterChecks, "RIGHT", 16, 0)
-
-    local customCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-    customCheck:SetSize(22, 22)
-    customCheck.text = colorLabel
-    customCheck:SetPoint("LEFT", colorLabel, "RIGHT", 4, 0)
+    local colorLabel = makeLabel(row, "Highlight Color:")
+    colorLabel:SetPoint("LEFT", showCheck, "RIGHT", 16, 0)
 
     local swatch = createSwatch(row)
-    swatch:SetPoint("LEFT", customCheck, "RIGHT", 6, 0)
+    swatch:SetPoint("LEFT", colorLabel, "RIGHT", 6, 0)
     swatch:SetScript("OnClick", function()
         if not swatch:IsEnabled() then return end
         local r, g, b = HRF.GetSectionColor(sectionKey)
@@ -424,35 +402,34 @@ local function buildSectionShell(parent, title, sectionKey, opts)
         end
     end
 
-    customCheck:SetScript("OnClick", function(self)
-        local checked = self:GetChecked() == true
-        HRF.SetSectionGlowCustom(sectionKey, checked)
-        local showOn = showCheck:GetChecked() == true
-        local glowOn = (glowCheck == nil) or (glowCheck:GetChecked() == true)
-        updateSwatchEnabled(showOn and glowOn and checked)
-    end)
+    local glowCheck, glowLabel
+    local anchorAfterColor = swatch
+    if hasGlow then
+        glowLabel = makeLabel(row, "Glow:")
+        glowLabel:SetPoint("LEFT", swatch, "RIGHT", 16, 0)
 
-    local sizeLabel, sizeSlider = addSizeSlider(row, sectionKey, swatch)
-
-    local function cascadeCustom()
-        local showOn = showCheck:GetChecked() == true
-        local glowOn = (glowCheck == nil) or (glowCheck:GetChecked() == true)
-        local customRowActive = showOn and glowOn
-        if customRowActive then customCheck:Enable() else customCheck:Disable() end
-        setLabelEnabled(colorLabel, customRowActive)
-        updateSwatchEnabled(customRowActive and customCheck:GetChecked() == true)
+        glowCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+        glowCheck:SetSize(22, 22)
+        glowCheck.text = glowLabel
+        glowCheck:SetPoint("LEFT", glowLabel, "RIGHT", 4, 0)
+        anchorAfterColor = glowCheck
     end
 
+    local sizeLabel, sizeSlider = addSizeSlider(row, sectionKey, anchorAfterColor)
+
     showCheck:SetScript("OnClick", function(self)
-        HRF.SetSectionShow(sectionKey, self:GetChecked())
-        if glowCheck then updateGlowEnabled(glowCheck, showCheck, colorLabel) end
-        cascadeCustom()
+        local on = self:GetChecked() == true
+        HRF.SetSectionShow(sectionKey, on)
+        setLabelEnabled(colorLabel, on)
+        updateSwatchEnabled(on)
+        if glowCheck then
+            if on then glowCheck:Enable() else glowCheck:Disable() end
+            setLabelEnabled(glowLabel, on)
+        end
     end)
     if glowCheck then
         glowCheck:SetScript("OnClick", function(self)
             HRF.SetSectionGlow(sectionKey, self:GetChecked())
-            updateGlowEnabled(glowCheck, showCheck, colorLabel)
-            cascadeCustom()
         end)
     end
 
@@ -463,8 +440,8 @@ local function buildSectionShell(parent, title, sectionKey, opts)
         row = row,
         showCheck = showCheck,
         glowCheck = glowCheck,
+        glowLabel = glowLabel,
         colorLabel = colorLabel,
-        customCheck = customCheck,
         swatch = swatch,
         updateSwatchEnabled = updateSwatchEnabled,
         sizeSlider = sizeSlider,
@@ -476,28 +453,21 @@ local function refreshSection(section)
     local showOn = HRF.GetSectionShow(key)
     section.showCheck:SetChecked(showOn)
 
-    local glowOn = true
-    if section.glowCheck then
-        glowOn = HRF.GetSectionGlow(key)
-        section.glowCheck:SetChecked(glowOn)
-        updateGlowEnabled(section.glowCheck, section.showCheck, section.colorLabel)
-    else
-        setLabelEnabled(section.colorLabel, showOn)
+    setLabelEnabled(section.colorLabel, showOn)
+    if section.updateSwatchEnabled then
+        section.updateSwatchEnabled(showOn)
     end
 
-    local customOn = HRF.GetSectionGlowCustom(key)
-    if section.customCheck then
-        section.customCheck:SetChecked(customOn)
-        -- Custom Color row is only meaningful when the section shows and glows.
-        local customRowActive = showOn and glowOn
-        if customRowActive then
-            section.customCheck:Enable()
+    if section.glowCheck then
+        local glowOn = HRF.GetSectionGlow(key)
+        section.glowCheck:SetChecked(glowOn)
+        if showOn then
+            section.glowCheck:Enable()
         else
-            section.customCheck:Disable()
+            section.glowCheck:Disable()
         end
-        setLabelEnabled(section.colorLabel, customRowActive)
-        if section.updateSwatchEnabled then
-            section.updateSwatchEnabled(customRowActive and customOn)
+        if section.glowLabel then
+            setLabelEnabled(section.glowLabel, showOn)
         end
     end
 
