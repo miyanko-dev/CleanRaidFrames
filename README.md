@@ -1,25 +1,35 @@
-# Clean Raid Frames
+# CleanRaidFrames
 
-Adds three icon overlays to Blizzard's raid and party frames so healers can see what matters at a glance. Active only in healer specs.
+Adds three icon overlays to Blizzard's raid and party frames so healers see what matters at a glance. Active in healer specs only.
 
 ## Features
 
-- **Healer Buff Display** (top-right corner) — Up to four of your own HoTs / shields / atonements on the unit. Per-spec buff list with drag-and-drop ordering, per-buff Show and Glow toggles, and a configurable section glow color.
-- **Defensive Buff Icons** (top-left corner) — Major personal defensive cooldowns on the unit, with adjustable glow color and icon size.
-- **Dispellable CC Debuff Icon** (bottom-left corner) — Any dispellable crowd-control effect on the unit. Higher priority than the generic dispellable debuff icon below.
-- **Dispellable Debuff Icon** (bottom-left corner) — Any non-CC dispellable debuff on the unit. Hidden whenever a dispellable CC is active in the same slot.
+| Overlay | Corner | Shows |
+| --- | --- | --- |
+| Healer buffs | Top-right | Up to four of your own HoTs, shields or atonements on the unit |
+| Defensives | Top-left | The unit's major personal defensive cooldowns |
+| Dispellable CC | Bottom-left | Any dispellable crowd-control effect, higher priority than the row below |
+| Dispellable debuff | Bottom-left | Any non-CC dispellable debuff, hidden while a CC holds the slot |
+
+- Per-spec buff list with drag-and-drop ordering and per-buff Show and Glow toggles
+- Native gold proc glow, or a full color takeover with your own color per section
+- Icon size set as a percentage of raid-frame height
+- Test mode previews every icon on your live raid frames
+
+## Installation
+
+1. Copy the `CleanRaidFrames/` folder into `World of Warcraft/_retail_/Interface/AddOns/`.
+2. Restart the game or `/reload`.
+3. Enable **Clean Raid Frames** in the AddOns list.
 
 ## Configuration
 
-Open the settings panel via the WoW add-ons settings menu. Each section provides:
+Open **Options > AddOns > Clean Raid Frames**. Each section carries Enable and Glow checkboxes, a custom color toggle and picker, an icon size slider, test mode and a reset button.
 
-- Enable / Glow checkboxes
-- Custom Color toggle (off = native gold proc glow, on = full color takeover via desaturation)
-- Color picker
-- Icon size as a percentage of raid-frame height
-- Reset to defaults button
-- Test mode (toggle from the panel) to preview icons on your raid frames
+## Supported specs
 
-## Supported Healer Specs
+Discipline and Holy Priest, Holy Paladin, Restoration Shaman, Mistweaver Monk, Restoration Druid, Preservation and Augmentation Evoker.
 
-Discipline / Holy Priest, Holy Paladin, Restoration Shaman, Mistweaver Monk, Restoration Druid, Preservation / Augmentation Evoker.
+## Requirements
+
+World of Warcraft Retail (Interface `120005`).
